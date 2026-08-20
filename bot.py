@@ -602,12 +602,13 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("newdeal:currency:"):
         currency = data.rsplit(":", 1)[1].upper()
-        state = context.user_data.get("nt_new_deal")
+        state = get_nt_state(context, update)
         if not state or state.get("step") != "currency" or currency not in SUPPORTED_CURRENCIES:
             await query.answer("Start again with /add", show_alert=True)
             return
         state["currency"] = currency
         state["step"] = "amount"
+        set_nt_state(context, update, state)
         await query.edit_message_text(
             f"➤ Tell me deal amount in <b>{currency}</b>\nex - <code>1</code>, <code>100</code>, <code>1000</code>",
             parse_mode=ParseMode.HTML,
@@ -755,23 +756,51 @@ def nt_form_text(currency, amount, escrower):
 
 
 def parse_nt_form(text):
-    text = normalize_bold(text or "")
-    def field(name):
-        m = re.search(rf"(?:^|\n)\s*[➥➤•·▪▫●○‣\-]?\s*{name}\s*:\s*(.*?)(?=\n|$)", text, re.I)
+    """
+    Parse a copied NTwallet form robustly.
+
+    Accepted examples:
+      ➥ Deal Type: USDT
+      ➥ Buyer : @piyush_ff
+      ➥ Seller : @ChainNvr
+      ➥ Item : usdt
+      ➥ Amount : 50 USDT
+      ➥ Terms : no
+
+    The header and "Escrowed by" line are optional.
+    """
+    text = normalize_bold(text or "").replace("\r\n", "\n").replace("\r", "\n")
+
+    def get_field(label):
+        # Match the complete line, allowing any common bullet/prefix.
+        pattern = rf"(?im)^[ \t]*(?:➥|➤|•|·|▪|▫|●|○|‣|-)?[ \t]*{label}[ \t]*:[ \t]*(.*?)[ \t]*$"
+        m = re.search(pattern, text)
         return m.group(1).strip() if m else ""
 
-    currency = field(r"Deal\s*Type").upper()
-    buyer = field("Buyer")
-    seller = field("Seller")
-    item = field("Item")
-    amount_raw = field("Amount")
-    terms = field("Terms")
+    currency = get_field(r"Deal[ \t]*Type").upper()
+    buyer = get_field(r"Buyer")
+    seller = get_field(r"Seller")
+    item = get_field(r"Item")
+    amount_raw = get_field(r"Amount")
+    terms = get_field(r"Terms")
 
     if currency not in SUPPORTED_CURRENCIES:
-        return None
+        return None, "Deal Type missing/invalid. Use TON, USDT or INR."
+
     amount = extract_amount(amount_raw)
-    if amount <= 0 or not buyer or not seller or not item or not terms:
-        return None
+    if amount <= 0:
+        return None, "Amount missing/invalid."
+
+    if not buyer:
+        return None, "Buyer missing."
+    if not seller:
+        return None, "Seller missing."
+    if not item:
+        return None, "Item missing."
+    if not terms:
+        return None, "Terms missing."
+
+    # Normalize usernames. Keep Telegram @username format.
     if not buyer.startswith("@"):
         buyer = "@" + buyer
     if not seller.startswith("@"):
@@ -784,7 +813,8 @@ def parse_nt_form(text):
         "item": item,
         "amount": amount,
         "terms": terms,
-    }
+    }, None
+
 
 
 def payment_received_text(tid, deal):
@@ -846,39 +876,110 @@ def refunded_text(tid, deal):
     )
 
 
+def nt_state_key(update: Update):
+    """Separate interactive /add state by chat + user."""
+    return f"{update.effective_chat.id}:{update.effective_user.id}"
+
+
+def get_nt_state(context, update):
+    return context.user_data.get("nt_new_deal", {}).get(nt_state_key(update))
+
+
+def set_nt_state(context, update, state):
+    all_states = context.user_data.setdefault("nt_new_deal", {})
+    all_states[nt_state_key(update)] = state
+
+
+def pop_nt_state(context, update):
+    all_states = context.user_data.get("nt_new_deal", {})
+    return all_states.pop(nt_state_key(update), None)
+
+
 async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
+
     remember_user(update)
     text = update.message.text.strip()
-    state = context.user_data.get("nt_new_deal")
+    state = get_nt_state(context, update)
 
+    # Step 1: amount
     if state and state.get("step") == "amount":
         amount = extract_amount(text)
         if amount <= 0:
-            await update.message.reply_text("❌ Valid amount bhejo. Example: <code>1</code>, <code>8.1</code>, <code>100</code>", parse_mode=ParseMode.HTML)
+            await update.message.reply_text(
+                "❌ Valid amount bhejo.\n"
+                "Example: <code>50</code> or <code>50.5</code>",
+                parse_mode=ParseMode.HTML,
+            )
             return
+
         state["amount"] = amount
         state["step"] = "form"
-        await update.message.reply_text(nt_form_text(state["currency"], amount, state["escrower"]), parse_mode=ParseMode.HTML)
-        await update.message.reply_text("Fill the rest Form properly :\n\nBuyer, Seller, Item aur Terms fill karke is form ko reply me bhejo.")
+        set_nt_state(context, update, state)
+
+        await update.message.reply_text(
+            nt_form_text(state["currency"], amount, state["escrower"]),
+            parse_mode=ParseMode.HTML,
+        )
+        await update.message.reply_text(
+            "📝 <b>Form fill karke new message me bhejo.</b>\n\n"
+            "Buyer, Seller, Item aur Terms required hain.\n"
+            "Example:\n\n"
+            "<code>➥ Deal Type: USDT\n"
+            "➥ Buyer : @piyush_ff\n"
+            "➥ Seller : @ChainNvr\n"
+            "➥ Item : usdt\n"
+            "➥ Amount : 50 USDT\n"
+            "➥ Terms : no</code>",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
+    # Step 2: completed form
     if not state or state.get("step") != "form":
         return
 
-    parsed = parse_nt_form(text)
+    parsed, error = parse_nt_form(text)
     if not parsed:
+        await update.message.reply_text(
+            "❌ <b>Form read nahi hua.</b>\n\n"
+            f"Reason: {esc(error or 'Unknown error')}\n\n"
+            "Isi format me complete form bhejo:\n"
+            "<code>➥ Deal Type: USDT\n"
+            "➥ Buyer : @piyush_ff\n"
+            "➥ Seller : @ChainNvr\n"
+            "➥ Item : usdt\n"
+            "➥ Amount : 50 USDT\n"
+            "➥ Terms : no</code>",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
-    if parsed["currency"] != state["currency"] or abs(parsed["amount"] - float(state["amount"])) > 1e-9:
-        await update.message.reply_text("❌ Deal Type aur Amount wizard wale hi rehne chahiye. Dobara /add use karo.")
+    # Wizard values cannot be silently changed by the copied form.
+    if parsed["currency"] != state["currency"]:
+        await update.message.reply_text(
+            f"❌ Deal Type <b>{esc(parsed['currency'])}</b> hai, "
+            f"lekin wizard me <b>{esc(state['currency'])}</b> selected tha.\n"
+            "Dobara /add chalao.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if abs(parsed["amount"] - float(state["amount"])) > 1e-9:
+        await update.message.reply_text(
+            f"❌ Amount <b>{esc(str(parsed['amount']))}</b> hai, "
+            f"lekin wizard amount <b>{esc(str(state['amount']))}</b> tha.\n"
+            "Dobara /add chalao.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     tid = next_trade_id()
     amount = float(state["amount"])
     fee_percent = DEFAULT_FEE_PERCENT
     fee_amount = amount * fee_percent / 100
+
     DEALS[tid] = {
         "buyer": parsed["buyer"],
         "seller": parsed["seller"],
@@ -896,9 +997,16 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "votes": {"release": [], "refund": []},
     }
+
     save_deal(tid)
-    context.user_data.pop("nt_new_deal", None)
-    await update.message.reply_text(payment_received_text(tid, DEALS[tid]), parse_mode=ParseMode.HTML, reply_markup=deal_action_kb(tid))
+    pop_nt_state(context, update)
+
+    await update.message.reply_text(
+        payment_received_text(tid, DEALS[tid]),
+        parse_mode=ParseMode.HTML,
+        reply_markup=deal_action_kb(tid),
+    )
+
 
 
 # ===========================
@@ -926,12 +1034,12 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(reason)
         return
 
-    context.user_data["nt_new_deal"] = {
+    set_nt_state(context, update, {
         "step": "currency",
         "escrower": resolve_username(update),
         "creator_id": update.effective_user.id,
         "chat_id": update.effective_chat.id,
-    }
+    })
     await update.message.reply_text(
         "🛡 <b>What type of deal ?</b>\n\n➤ Select the currency below :",
         parse_mode=ParseMode.HTML,
