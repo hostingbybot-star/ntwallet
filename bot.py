@@ -1023,6 +1023,33 @@ async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
+    remember_user(update)
+
+    escrower = resolve_username(update)
+
+    context.user_data["nt_new_deal"] = {
+        "step": "form_direct",
+        "escrower": escrower,
+        "creator_id": update.effective_user.id,
+        "chat_id": update.effective_chat.id,
+    }
+
+    await update.message.reply_text(
+        "#NFTTraders Escrow :\n\n"
+        "➥ Deal Type: \n"
+        "➥ Buyer :\n"
+        "➥ Seller : \n"
+        "➥ Item : \n"
+        "➥ Amount :\n"
+        "➥ Holding : \n"
+        "➥ Terms : \n\n"
+        f"🔒 Escrowed by {escrower}",
+    )
+
 # ===========================
 # /add
 # ===========================
@@ -1550,6 +1577,7 @@ def main():
     app.add_handler(CommandHandler("add", add))
     app.add_handler(CommandHandler("close", close))
     app.add_handler(CommandHandler("hold", hold_cmd))
+    app.add_handler(CommandHandler("form", form_cmd))
     app.add_handler(CommandHandler("broadcast", broadcast_cmd))
     app.add_handler(CommandHandler("alldeals", alldeals_cmd))
     app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
