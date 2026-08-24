@@ -2148,7 +2148,7 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if (
         args
         and re.fullmatch(
-            r"DL-TR4DE-\d+"
+            r"DL-TR4DE-\d+",
             args[0],
             re.I,
         )
