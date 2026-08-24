@@ -601,11 +601,18 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         votes.setdefault("refund", [])
         opposite = "refund" if action == "release" else "release"
         votes[opposite] = [x for x in votes[opposite] if x.lower() != username]
+        voter_handle = resolve_username(update)
         if username not in [x.lower() for x in votes[action]]:
-            votes[action].append(resolve_username(update))
+            votes[action].append(voter_handle)
         save_deal(tid)
 
         await query.answer(f"✅ Your vote recorded: {action.title()}")
+
+        # Har vote par ek chhota confirmation message chat me jaata hai.
+        await context.bot.send_message(
+            chat_id=deal["chat_id"],
+            text=f"{esc(voter_handle)} agreed for {action}",
+        )
 
         if parties.issubset({x.lower() for x in votes[action]}):
             verb = "releasing" if action == "release" else "refunding"
@@ -623,10 +630,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
                 pass
-
-            # Dono parties agree ho chuke — deal ko turant finalize kar do,
-            # manual /close ka wait nahi karna.
-            await finalize_deal(context, tid, deal, action, closer_id=None)
+            # Ab escrower manually /close chalayega (custom amount ke saath
+            # bhi, e.g. /close 50) — yahan auto-finalize nahi hota.
         return
 
     # Everything below is the plain dashboard/menu navigation — none of it
@@ -1121,10 +1126,10 @@ async def hold_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Deal finalization — shared by auto-vote completion and /close
 # ===========================
 
-async def finalize_deal(context: ContextTypes.DEFAULT_TYPE, tid, deal, mode, closer_id=None):
+async def finalize_deal(context: ContextTypes.DEFAULT_TYPE, tid, deal, mode, closer_id=None, custom_amount=None):
     """Marks an ACTIVE deal COMPLETED/REFUNDED and sends the result + vouch
-    messages to the deal's chat. Used both when both parties agree via the
-    Release/Refund buttons (auto) and from /close (manual, owner override)."""
+    messages to the deal's chat. Called from /close (manual — the escrower
+    decides when to close, optionally with a custom amount, e.g. /close 50)."""
     if deal.get("status") != "ACTIVE":
         return False
 
@@ -1136,7 +1141,7 @@ async def finalize_deal(context: ContextTypes.DEFAULT_TYPE, tid, deal, mode, clo
 
     if mode == "refund":
         deal["status"] = "REFUNDED"
-        deal["refunded"] = float(deal["amount"])
+        deal["refunded"] = float(custom_amount) if custom_amount is not None else float(deal["amount"])
         save_deal(tid)
         await context.bot.send_message(
             chat_id=chat_id,
@@ -1145,7 +1150,7 @@ async def finalize_deal(context: ContextTypes.DEFAULT_TYPE, tid, deal, mode, clo
         )
     else:
         deal["status"] = "COMPLETED"
-        deal["released"] = float(deal.get("release", 0))
+        deal["released"] = float(custom_amount) if custom_amount is not None else float(deal.get("release", 0))
         save_deal(tid)
         await context.bot.send_message(
             chat_id=chat_id,
@@ -1153,13 +1158,21 @@ async def finalize_deal(context: ContextTypes.DEFAULT_TYPE, tid, deal, mode, clo
             parse_mode=ParseMode.HTML,
         )
         amount = fmt(deal["amount"], deal["currency"])
+        # Teeno alag-alag messages, is order me: vouch 1, vouch 2, fir
+        # "copy and paste both vouches" prompt sabse last me.
         await context.bot.send_message(
             chat_id=chat_id,
-            text=(
-                f"😐 {esc(deal['buyer'])} and {esc(deal['seller'])} please copy and paste both vouches!\n\n"
-                f"<code>Vouch {esc(ESCROW_OWNER)} for {esc(amount)} safe Escrow deal</code>\n\n"
-                f"<code>Vouch {esc(deal['escrowed_by'])} for {esc(amount)} M'm deal</code>"
-            ),
+            text=f"<code>Vouch {esc(ESCROW_OWNER)} for {esc(amount)} safe Escrow deal</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"<code>Vouch {esc(deal['escrowed_by'])} for {esc(amount)} M'm deal</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"😐 {esc(deal['buyer'])} and {esc(deal['seller'])} please copy and paste both vouches!",
             parse_mode=ParseMode.HTML,
         )
 
@@ -1179,6 +1192,7 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     tid = None
     mode = "release"
+    custom_amount = None
     args = list(context.args)
 
     if args and re.fullmatch(r"DL-NTWALLET-\d+", args[0], re.I):
@@ -1188,12 +1202,18 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if m:
             tid = m.group(1).upper()
 
-    if args and args[0].lower() in ("refund", "cancel"):
-        mode = "refund"
+    for a in args:
+        if a.lower() in ("refund", "cancel"):
+            mode = "refund"
+        else:
+            val = extract_amount(a)
+            if val > 0:
+                custom_amount = val
 
     if not tid:
         await update.message.reply_text(
-            "Usage:\n<code>/close DL-NTWALLET-1</code>\n<code>/close DL-NTWALLET-1 refund</code>",
+            "Usage:\n<code>/close DL-NTWALLET-1</code>\n<code>/close DL-NTWALLET-1 refund</code>\n"
+            "<code>/close 50</code> — custom amount (reply to the deal message)",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1223,7 +1243,7 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     deal["closed_by"] = resolve_username(update)
-    await finalize_deal(context, tid, deal, mode, closer_id=closer_id)
+    await finalize_deal(context, tid, deal, mode, closer_id=closer_id, custom_amount=custom_amount)
 
     try:
         await update.message.delete()
