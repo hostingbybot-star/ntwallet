@@ -27,17 +27,23 @@ load_dotenv()
 # NTESCROW_BOT_TOKEN=xxxx
 # MONGO_URI=xxxx
 # ADMIN_IDS=123,456   -> ye "OWNERS" hai, sirf ye naye bot-admin add/remove kar sakte hai
+# ESCROW_OWNER_HANDLE=@tr4degc  -> footer "Escrowed by" me hamesha yehi dikhega
 
 BOT_TOKEN = os.getenv("NTESCROW_BOT_TOKEN")
-BRAND = "@NTescrowbot"
-PROVIDER = "@NTescrowbot"
+BRAND = "@Tr4derz"
+PROVIDER = "@Tr4derz"
+
+# Footer/lock-emoji line ("🔒 Escrowed by ...") hamesha ye fixed handle use karega,
+# chahe deal kisi bhi admin ne /add kiya ho. Deal-level "Escrower:" field alag hai
+# aur us admin ka username dikhata hai jisne deal /add kiya.
+ESCROW_OWNER = os.getenv("ESCROW_OWNER_HANDLE", "@tr4degc")
 
 MONGO_URI = os.getenv("MONGO_URI")
 OWNER_IDS = set(
     int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()
 )
 
-# In "limited" secondary accounts se /add ya /close chale to "Escrowed By" me
+# In "limited" secondary accounts se /add ya /close chale to "Escrower" me
 # inka username nahi, mapped MAIN username dikhega.
 ADMIN_ALIASES = {}
 
@@ -86,47 +92,14 @@ def admin_only_allowed(update: Update):
 
 async def add_close_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /add aur /close ke liye permission check:
+    /add aur /close ke liye permission check.
 
-    - Private chat: sirf hamari internal list wale bot-admin/owner (BOT_ADMINS / OWNER_IDS)
-      use kar sakte hai.
-    - Group / Supergroup: us GROUP ka Telegram-level admin ya owner (creator) use kar
-      sakta hai — chahe wo hamari internal BOT_ADMINS list me ho ya na ho. Saath hi,
-      BOT khud bhi us group me admin/owner hona chahiye, warna message delete/manage
-      permission nahi milegi aur command kaam nahi karegi.
-
-    Return: (allowed: bool, reason: str | None)
-    reason sirf tab bheja jaata hai jab helpful diagnostic dena ho (warna silent skip).
+    Sirf hamari internal list wale bot-admin/owner (.env ADMIN_IDS + /addadmin se
+    add kiye gaye) use kar sakte hai — chahe private chat ho ya group. Telegram-level
+    group admin hone se koi permission nahi milti; sirf env/DB wale admins hi kaam
+    karenge, jis bhi group me bot admin ne unhe use kiya.
     """
-    chat = update.effective_chat
-    user_id = update.effective_user.id
-
-    if chat.type == "private":
-        return is_admin(user_id), None
-
-    if chat.type not in ("group", "supergroup"):
-        return False, None
-
-    # 1) Bot khud us group me admin/owner hai?
-    try:
-        bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
-    except Exception:
-        return False, "❌ Bot ka admin status is group me check nahi ho paaya."
-    if bot_member.status not in ("administrator", "creator"):
-        return False, (
-            "❌ Ye command tabhi kaam karegi jab BOT is group me Admin ho "
-            "(pehle bot ko group me admin banao)."
-        )
-
-    # 2) Command chalane wala us group ka admin/owner hai?
-    try:
-        user_member = await context.bot.get_chat_member(chat.id, user_id)
-    except Exception:
-        return False, "❌ Tumhara admin status is group me check nahi ho paaya."
-    if user_member.status not in ("administrator", "creator"):
-        return False, None  # normal member ke liye silent skip
-
-    return True, None
+    return is_admin(update.effective_user.id), None
 
 
 # ===========================
@@ -219,18 +192,6 @@ def normalize_bold(text):
 # ===========================
 # Premium Emoji IDs
 # ===========================
-# Ye IDs Telegram Premium custom-emoji document IDs hain. Har entry me "character"
-# (jaise ⭐, ❤️) sirf fallback hai un clients ke liye jinke paas Premium nahi hai —
-# actual visual wahi custom emoji hoga jiska ID diya gaya hai.
-#
-# Agar koi ID galat / expired ho jaaye to Telegram sirf fallback character dikha
-# dega (crash nahi hoga). Apni khud ki custom emoji IDs nikalne ke liye:
-#   1) Us emoji ko kisi message me bhejo jisme HTML/entities dikhne wala export ho
-#      (ya koi "emoji id finder" utility bot use karo jo message forward karke
-#      custom_emoji entities se ID nikaalta hai).
-#   2) Wahan se mile document_id ko yaha neeche waali dict me daal do.
-#
-# Neeche di gayi IDs me se check / trade / escrow verify ho chuki hain (working).
 PE = {
     "⭐️": "5181422544162391976",
     "❤️": "5260535596941582167",
@@ -305,7 +266,6 @@ def main_menu_kb():
 
 
 def status_kb():
-    """Keyboard jo /status ke saath jaata hai — private aur group dono me kaam karta hai."""
     rows = [
         [InlineKeyboardButton("★ My Deals Info", callback_data="menu:my_deals")],
         [InlineKeyboardButton("➤ My Pending Deals", callback_data="menu:pending")],
@@ -447,7 +407,7 @@ def deal_detail_text(tid, deal):
         f"➥ Seller: {esc(deal.get('seller', '-'))}",
         f"➥ Amount: {fmt(deal.get('amount', 0), deal.get('currency', 'INR'))}",
         f"➥ Fees: {deal.get('fee_percent', 0):.1f}%",
-        f"➥ Escrowed by: {esc(deal.get('escrowed_by', '-'))}",
+        f"➥ Escrower: {esc(deal.get('escrowed_by', '-'))}",
     ]
 
     if deal.get("created_at"):
@@ -602,8 +562,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # NOTE: Telegram only accepts ONE answerCallbackQuery per click. Every
     # branch below must call query.answer() itself (with or without an
-    # alert) instead of relying on a shared call up here — a second answer()
-    # after an alert answer() throws and silently kills the response.
+    # alert) instead of relying on a shared call up here.
 
     if data.startswith("newdeal:currency:"):
         currency = data.rsplit(":", 1)[1].upper()
@@ -649,13 +608,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer(f"✅ Your vote recorded: {action.title()}")
 
         if parties.issubset({x.lower() for x in votes[action]}):
+            verb = "releasing" if action == "release" else "refunding"
             label = "Release" if action == "release" else "Refund"
             await context.bot.send_message(
                 chat_id=deal["chat_id"],
                 text=(
                     f"😐 Buyer [{esc(deal['buyer'])}] & Seller [{esc(deal['seller'])}] agreed to {label}.\n\n"
                     f"Dear {esc(deal['escrowed_by'])}, please {action} the funds according to deal.\n\n"
-                    "❗️Verify both usernames before proceeding."
+                    f"❗️Verify both usernames before {verb}."
                 ),
                 parse_mode=ParseMode.HTML,
             )
@@ -663,6 +623,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
                 pass
+
+            # Dono parties agree ho chuke — deal ko turant finalize kar do,
+            # manual /close ka wait nahi karna.
+            await finalize_deal(context, tid, deal, action, closer_id=None)
         return
 
     # Everything below is the plain dashboard/menu navigation — none of it
@@ -670,7 +634,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if data == "menu:back":
-        # Private me full dashboard, group me wapas apne status pe.
         if update.effective_chat.type == "private":
             await query.edit_message_text(
                 welcome_text(update.effective_user.first_name),
@@ -730,14 +693,13 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-
 # ===========================
 # NTwallet interactive deal flow
 # ===========================
 
 SUPPORTED_CURRENCIES = ("TON", "USDT", "INR")
 DEFAULT_FEE_PERCENT = float(os.getenv("DEAL_FEE_PERCENT", "1.0"))
-FORM_TITLE = "#NTwallet [Escrow Form]"
+FORM_TITLE = "#NFTTraders Escrow"
 
 
 def currency_kb():
@@ -755,7 +717,7 @@ def deal_action_kb(tid):
     ]])
 
 
-def nt_form_text(currency, amount, escrower):
+def nt_form_text(currency, amount):
     return (
         f"<b>{FORM_TITLE}</b> :\n\n"
         f"➥ Deal Type: {esc(currency)}\n"
@@ -763,29 +725,30 @@ def nt_form_text(currency, amount, escrower):
         "➥ Seller :\n"
         "➥ Item :\n"
         f"➥ Amount : {esc(fmt(amount, currency))}\n"
+        "➥ Holding :\n"
         "➥ Terms :\n\n"
-        f"🔒 Escrowed by {esc(escrower)}"
+        f"🔒 Escrowed by {esc(ESCROW_OWNER)}"
     )
 
 
 def parse_nt_form(text):
     """
-    Parse a copied NTwallet form robustly.
+    Parse a copied NFTTraders form robustly.
 
-    Accepted examples:
+    Accepted example:
       ➥ Deal Type: USDT
       ➥ Buyer : @piyush_ff
       ➥ Seller : @ChainNvr
       ➥ Item : usdt
       ➥ Amount : 50 USDT
+      ➥ Holding : sending first
       ➥ Terms : no
 
-    The header and "Escrowed by" line are optional.
+    The header, Holding line and "Escrowed by" line are optional.
     """
     text = normalize_bold(text or "").replace("\r\n", "\n").replace("\r", "\n")
 
     def get_field(label):
-        # Match the complete line, allowing any common bullet/prefix.
         pattern = rf"(?im)^[ \t]*(?:➥|➤|•|·|▪|▫|●|○|‣|-)?[ \t]*{label}[ \t]*:[ \t]*(.*?)[ \t]*$"
         m = re.search(pattern, text)
         return m.group(1).strip() if m else ""
@@ -795,6 +758,7 @@ def parse_nt_form(text):
     seller = get_field(r"Seller")
     item = get_field(r"Item")
     amount_raw = get_field(r"Amount")
+    holding = get_field(r"Holding")
     terms = get_field(r"Terms")
 
     if currency not in SUPPORTED_CURRENCIES:
@@ -813,7 +777,6 @@ def parse_nt_form(text):
     if not terms:
         return None, "Terms missing."
 
-    # Normalize usernames. Keep Telegram @username format.
     if not buyer.startswith("@"):
         buyer = "@" + buyer
     if not seller.startswith("@"):
@@ -825,9 +788,9 @@ def parse_nt_form(text):
         "seller": seller,
         "item": item,
         "amount": amount,
+        "holding": holding,
         "terms": terms,
     }, None
-
 
 
 def payment_received_text(tid, deal):
@@ -844,8 +807,15 @@ def payment_received_text(tid, deal):
         f"➥ Start Time: {dt.strftime('%H:%M:%S')}\n"
         f"   [ {dt.strftime('%d %B %Y')} ]\n"
         "─────────────────\n"
-        f"🔒 Escrowed by {esc(deal['escrowed_by'])}\n"
+        f"🔒 Escrowed by {esc(ESCROW_OWNER)}\n"
         f"⭐️ Provided by {PROVIDER}"
+    )
+
+
+def confirm_prompt_text(deal):
+    return (
+        f"✅ {esc(deal['buyer'])} and {esc(deal['seller'])} confirm the button "
+        "below after deal completion and discussion !"
     )
 
 
@@ -864,7 +834,7 @@ def completed_text(tid, deal):
         f"➥ End Time: {dt.strftime('%H:%M:%S')}\n"
         f"   [ {dt.strftime('%d %B %Y')} ]\n"
         "─────────────────\n"
-        f"🔒 Escrowed by {esc(deal['escrowed_by'])}\n"
+        f"🔒 Escrowed by {esc(ESCROW_OWNER)}\n"
         f"⭐️ Provided by {PROVIDER}"
     )
 
@@ -884,13 +854,12 @@ def refunded_text(tid, deal):
         f"➥ End Time: {dt.strftime('%H:%M:%S')}\n"
         f"   [ {dt.strftime('%d %B %Y')} ]\n"
         "─────────────────\n"
-        f"🔒 Escrowed by {esc(deal['escrowed_by'])}\n"
+        f"🔒 Escrowed by {esc(ESCROW_OWNER)}\n"
         f"⭐️ Provided by {PROVIDER}"
     )
 
 
 def nt_state_key(update: Update):
-    """Separate interactive /add state by chat + user."""
     return f"{update.effective_chat.id}:{update.effective_user.id}"
 
 
@@ -909,11 +878,11 @@ def pop_nt_state(context, update):
 
 
 async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Only handles the one remaining text step of the /form wizard: waiting
-    for the deal amount after a currency button was tapped. Once the amount
-    is in, the prefilled template is posted and the wizard state is cleared —
+    """Handles the one remaining text step of the /form wizard: waiting for
+    the deal amount after a currency button was tapped. Once the amount is
+    in, the prefilled template is posted and the wizard state is cleared —
     actually creating the deal happens later via /add replying to the
-    (now buyer/seller/item/terms-filled) template, not by watching chat text."""
+    (now buyer/seller/item/terms-filled) template."""
     if not update.message or not update.message.text:
         return
 
@@ -927,30 +896,23 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     amount = extract_amount(text)
     if amount <= 0:
         await update.message.reply_text(
-            "❌ Valid amount bhejo.\n"
-            "Example: <code>50</code> or <code>50.5</code>",
+            "❌ Valid amount bhejo.\nExample: <code>50</code> or <code>50.5</code>",
             parse_mode=ParseMode.HTML,
         )
         return
 
     currency = state["currency"]
-    escrower = state["escrower"]
-    pop_nt_state(context, update)  # wizard's job is done; /add finalizes later
+    pop_nt_state(context, update)
 
     await update.message.reply_text(
-        nt_form_text(currency, amount, escrower),
+        nt_form_text(currency, amount),
         parse_mode=ParseMode.HTML,
     )
     await update.message.reply_text(
-        "📝 <b>Upar wale form ko copy karke Buyer, Seller, Item aur Terms fill karo, "
-        "phir naya message bhejo.</b>\n\n"
-        "Fill hone ke baad usi (apne bheje hue) message par reply karke:\n"
-        "<code>/add</code> — form me jo amount hai wahi use hoga\n"
-        "<code>/add 500</code> — custom amount (500) use hoga, jitna chahiye utna\n\n"
-        "Deal create hote hi niche Release/Refund buttons aa jayenge.",
+        "📝 Fill Buyer/Seller/Item/Holding/Terms, send it, then reply to that "
+        "message with <code>/add</code> (or <code>/add 500</code> for a custom amount).",
         parse_mode=ParseMode.HTML,
     )
-
 
 
 # ===========================
@@ -958,7 +920,6 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 
 async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Har user apna khud ka status dekh sakta hai — group ho ya private, koi restriction nahi."""
     remember_user(update)
     await update.message.reply_text(
         my_status_text(update),
@@ -969,8 +930,7 @@ async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start the guided deal template: pick currency -> enter amount ->
-    bot posts a form with Deal Type & Amount already filled in, ready for
-    the admin to add Buyer/Seller/Item/Terms and send back."""
+    bot posts a form with Deal Type & Amount already filled in."""
     if not update.message:
         return
 
@@ -983,7 +943,6 @@ async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_user(update)
     set_nt_state(context, update, {
         "step": "currency",
-        "escrower": resolve_username(update),
         "creator_id": update.effective_user.id,
         "chat_id": update.effective_chat.id,
     })
@@ -993,16 +952,16 @@ async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=currency_kb(),
     )
 
+
 # ===========================
 # /add — finalize a deal from a filled-in form
 # ===========================
 
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Reply to a filled-in deal form (from /form, or hand-typed in the
-    same layout) with /add to actually create the deal.
+    """Reply to a filled-in deal form with /add to create the deal.
 
-    /add           -> uses the Amount already written in the form
-    /add 500       -> overrides the amount with a custom value (500)
+    /add       -> uses the Amount already written in the form
+    /add 500   -> overrides the amount with a custom value (500)
     """
     allowed, reason = await add_close_allowed(update, context)
     if not allowed:
@@ -1018,10 +977,7 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not raw_text.strip():
         await update.message.reply_text(
-            "❌ Filled hue deal-form wale message par reply karke <code>/add</code> bhejo.\n\n"
-            "Pehle <code>/form</code> se template lo, Buyer/Seller/Item/Terms fill karke "
-            "bhejo, phir usi message par reply karke <code>/add</code> (ya "
-            "<code>/add 500</code> custom amount ke liye) chalao.",
+            "❌ Filled hue deal-form wale message par reply karke <code>/add</code> bhejo.",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1029,8 +985,7 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parsed, error = parse_nt_form(raw_text)
     if not parsed:
         await update.message.reply_text(
-            f"❌ <b>Form read nahi hua.</b>\n\nReason: {esc(error or 'Unknown error')}\n\n"
-            "Deal Type, Buyer, Seller, Item, Amount aur Terms — sab fields fill hone chahiye.",
+            f"❌ Form read nahi hua.\nReason: {esc(error or 'Unknown error')}",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1053,6 +1008,7 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "seller": parsed["seller"],
         "detail": parsed["item"],
         "item": parsed["item"],
+        "holding": parsed["holding"],
         "terms": parsed["terms"],
         "amount": amount_val,
         "release": max(0, amount_val - fee_amount),
@@ -1070,6 +1026,10 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         payment_received_text(tid, DEALS[tid]),
         parse_mode=ParseMode.HTML,
+    )
+    await update.message.reply_text(
+        confirm_prompt_text(DEALS[tid]),
+        parse_mode=ParseMode.HTML,
         reply_markup=deal_action_kb(tid),
     )
     try:
@@ -1079,7 +1039,6 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bail out of a stuck /form wizard."""
     if not update.message:
         return
     state = pop_nt_state(context, update)
@@ -1093,36 +1052,21 @@ async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # /hold — owner-only admin hold report
 # ===========================
 
-HOLD_ADMIN_EMOJI_ID = "5258011929993026890"
-
-
 def _hold_admin_emoji():
     return pe('🛡️')
 
 
-def _is_owner(user_id):
-    return user_id in OWNER_IDS
-
-
 async def hold_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Owner-only admin hold report.
-
-    Shows every bot admin's currently open (ACTIVE) deal amount.
-    /close removes the deal from this report automatically because its
-    status changes to COMPLETED/CANCELLED.
-    Non-owner users get no response.
-    """
+    """Owner-only admin hold report: every bot admin's currently open
+    (ACTIVE) deal amount. Non-admin users get no response."""
     if not update.effective_user or not is_admin(update.effective_user.id):
         return
 
-    # Only the owner can use this command, regardless of chat type.
     open_deals = [
         (tid, deal) for tid, deal in DEALS.items()
         if deal.get("status") == "ACTIVE"
     ]
 
-    # Group ACTIVE deals by the admin/escrower who created them.
     grouped = {}
     for tid, deal in open_deals:
         admin = deal.get("escrowed_by") or deal.get("created_by") or "-"
@@ -1179,7 +1123,56 @@ async def hold_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===========================
-# /close
+# Deal finalization — shared by auto-vote completion and /close
+# ===========================
+
+async def finalize_deal(context: ContextTypes.DEFAULT_TYPE, tid, deal, mode, closer_id=None):
+    """Marks an ACTIVE deal COMPLETED/REFUNDED and sends the result + vouch
+    messages to the deal's chat. Used both when both parties agree via the
+    Release/Refund buttons (auto) and from /close (manual, owner override)."""
+    if deal.get("status") != "ACTIVE":
+        return False
+
+    chat_id = deal["chat_id"]
+
+    deal["completed_at"] = datetime.now(timezone.utc).isoformat()
+    if closer_id is not None:
+        deal["closed_by_id"] = closer_id
+
+    if mode == "refund":
+        deal["status"] = "REFUNDED"
+        deal["refunded"] = float(deal["amount"])
+        save_deal(tid)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=refunded_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        deal["status"] = "COMPLETED"
+        deal["released"] = float(deal.get("release", 0))
+        save_deal(tid)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=completed_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+        )
+        amount = fmt(deal["amount"], deal["currency"])
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"😐 {esc(deal['buyer'])} and {esc(deal['seller'])} please copy and paste both vouches!\n\n"
+                f"<code>Vouch {esc(ESCROW_OWNER)} for {esc(amount)} safe Escrow deal</code>\n\n"
+                f"<code>Vouch {esc(deal['escrowed_by'])} for {esc(amount)} M'm deal</code>"
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+
+    return True
+
+
+# ===========================
+# /close — manual override (e.g. votes not usable, owner steps in)
 # ===========================
 
 async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1205,8 +1198,7 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not tid:
         await update.message.reply_text(
-            "Usage:\n<code>/close DL-NTWALLET-1</code>\n<code>/close DL-NTWALLET-1 refund</code>\n\n"
-            "Ya Payment received message par reply: <code>/close</code> / <code>/close refund</code>",
+            "Usage:\n<code>/close DL-NTWALLET-1</code>\n<code>/close DL-NTWALLET-1 refund</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1235,27 +1227,8 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Buyer aur Seller dono ne {mode.title()} confirm nahi kiya.")
         return
 
-    deal["completed_at"] = datetime.now(timezone.utc).isoformat()
-    deal["closed_by_id"] = closer_id
     deal["closed_by"] = resolve_username(update)
-
-    if mode == "refund":
-        deal["status"] = "REFUNDED"
-        deal["refunded"] = float(deal["amount"])
-        save_deal(tid)
-        await update.message.reply_text(refunded_text(tid, deal), parse_mode=ParseMode.HTML)
-    else:
-        deal["status"] = "COMPLETED"
-        deal["released"] = float(deal.get("release", 0))
-        save_deal(tid)
-        await update.message.reply_text(completed_text(tid, deal), parse_mode=ParseMode.HTML)
-        amount = fmt(deal["amount"], deal["currency"])
-        await update.message.reply_text(
-            f"😐 {esc(deal['buyer'])} and {esc(deal['seller'])} please copy and paste both vouches!\n\n"
-            f"<code>Vouch {BRAND} for {esc(amount)} safe Escrow deal</code>\n\n"
-            f"<code>Vouch {esc(deal['escrowed_by'])} for {esc(amount)} M'm deal</code>",
-            parse_mode=ParseMode.HTML,
-        )
+    await finalize_deal(context, tid, deal, mode, closer_id=closer_id)
 
     try:
         await update.message.delete()
@@ -1268,7 +1241,6 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 
 async def alldeals_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Purana '/status' — ab admin ke liye saari deals ki poori list, private-only."""
     if not admin_only_allowed(update):
         return
 
@@ -1315,7 +1287,6 @@ async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def deal_lookup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/deal DL-NTWALLET-5 -> admin kisi bhi deal ki full detail (escrowed_by samet) dekh sakta hai."""
     if not admin_only_allowed(update):
         return
 
@@ -1345,10 +1316,8 @@ async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.reply_to_message:
         target_user = update.message.reply_to_message.from_user
         target_id = target_user.id
-
     elif context.args and context.args[0].isdigit():
         target_id = int(context.args[0])
-
     else:
         await update.message.reply_text(
             "Usage: kisi user ke message pe reply karke /addadmin bhejo, "
@@ -1359,11 +1328,7 @@ async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     BOT_ADMINS.add(target_id)
 
-    admin_data = {
-        "added_by": update.effective_user.id,
-    }
-
-    # Reply se add karne par user's real Telegram details save hongi
+    admin_data = {"added_by": update.effective_user.id}
     if target_user:
         admin_data.update({
             "username": target_user.username,
@@ -1372,11 +1337,7 @@ async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
 
     if admins_coll is not None:
-        admins_coll.update_one(
-            {"_id": target_id},
-            {"$set": admin_data},
-            upsert=True,
-        )
+        admins_coll.update_one({"_id": target_id}, {"$set": admin_data}, upsert=True)
 
     await update.message.reply_text(
         f"✅ <code>{target_id}</code> ab bot admin hai.",
@@ -1414,86 +1375,50 @@ async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines = [f"{pe('👑')} <b>Owners</b>"]
 
-    # ==========================
-    # OWNERS
-    # ==========================
     if not OWNER_IDS:
         lines.append("  (koi owner set nahi hai)")
     else:
         for uid in sorted(OWNER_IDS):
-            lines.append(
-                f'  • <a href="tg://user?id={uid}">Owner</a> '
-                f'<code>({uid})</code>'
-            )
+            lines.append(f'  • <a href="tg://user?id={uid}">Owner</a> <code>({uid})</code>')
 
-    # Extra admins
     extra_admins = BOT_ADMINS - OWNER_IDS
-
     lines.append(f"\n{pe('🛡')} <b>Bot Admins</b>")
 
     if not extra_admins:
         lines.append("  (koi extra admin nahi hai)")
     else:
         for uid in sorted(extra_admins):
-
-            # Default values
             username = None
             first_name = None
             last_name = None
 
-            # ==========================
-            # 1. MongoDB se saved details
-            # ==========================
             if admins_coll is not None:
-                admin_doc = admins_coll.find_one(
-                    {"_id": uid}
-                )
-
+                admin_doc = admins_coll.find_one({"_id": uid})
                 if admin_doc:
                     username = admin_doc.get("username")
                     first_name = admin_doc.get("first_name")
                     last_name = admin_doc.get("last_name")
 
-            # ==========================
-            # 2. Alias fallback
-            # ==========================
             if not username and uid in ADMIN_ALIASES:
                 username = ADMIN_ALIASES[uid]
 
-            # ==========================
-            # 3. Display name banao
-            # ==========================
-            display_name = ""
-
             if first_name:
                 display_name = first_name
-
                 if last_name:
                     display_name += f" {last_name}"
-
             elif username:
                 display_name = username.replace("_", " ").title()
-
             else:
                 display_name = "Admin"
 
-            # ==========================
-            # Clickable display
-            # ==========================
-
             if username:
-                # Username hai -> clickable public Telegram link
                 lines.append(
-                    f'  • <a href="https://t.me/{esc(username)}">'
-                    f'{esc(display_name)}</a> '
+                    f'  • <a href="https://t.me/{esc(username)}">{esc(display_name)}</a> '
                     f'<code>({uid})</code>'
                 )
-
             else:
-                # Username nahi hai -> ID based clickable mention
                 lines.append(
-                    f'  • <a href="tg://user?id={uid}">'
-                    f'{esc(display_name)}</a> '
+                    f'  • <a href="tg://user?id={uid}">{esc(display_name)}</a> '
                     f'<code>({uid})</code>'
                 )
 
@@ -1503,8 +1428,9 @@ async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True,
     )
 
+
 # ===========================
-# /help — admin/owner ko sab commands, normal user ko sirf user commands
+# /help
 # ===========================
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1521,11 +1447,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin(uid):
         lines += [
             "",
-            "<b>🛡 Admin Commands</b> (private chat me hi kaam karenge)",
+            "<b>🛡 Admin Commands</b>",
             "/form — Currency+amount wizard, deta hai prefilled template",
-            "/add — Filled form wale message pe reply karke deal finalize karo (ya /add 500 custom amount)",
+            "/add — Filled form wale message pe reply karke deal finalize karo (ya /add 500)",
             "/cancel — Cancel an in-progress /form wizard",
-            "/close — Dual-confirmed deal release/refund",
+            "/close — Manual override release/refund",
             "/alldeals — Saari deals ki poori list",
             "/leaderboard — Today + All-time top dealer/earner",
             "/deal &lt;DL-NTWALLET-N&gt; — Kisi bhi deal ki full detail dekho",
