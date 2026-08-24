@@ -930,14 +930,9 @@ async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start the guided deal template: pick currency -> enter amount ->
-    bot posts a form with Deal Type & Amount already filled in."""
+    bot posts a form with Deal Type & Amount already filled in.
+    Koi bhi user /form use kar sakta hai — sirf /add aur /close admin-only hai."""
     if not update.message:
-        return
-
-    allowed, reason = await add_close_allowed(update, context)
-    if not allowed:
-        if reason:
-            await update.message.reply_text(reason)
         return
 
     remember_user(update)
@@ -1441,6 +1436,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>👤 User Commands</b>",
         "/start — Dashboard kholo (private chat)",
         "/stats — Apna deal status dekho (private ya group, kahin bhi)",
+        "/form — Currency+amount wizard, deta hai prefilled template",
+        "/cancel — Cancel an in-progress /form wizard",
         "/help — Ye list dikhata hai",
     ]
 
@@ -1448,9 +1445,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += [
             "",
             "<b>🛡 Admin Commands</b>",
-            "/form — Currency+amount wizard, deta hai prefilled template",
             "/add — Filled form wale message pe reply karke deal finalize karo (ya /add 500)",
-            "/cancel — Cancel an in-progress /form wizard",
             "/close — Manual override release/refund",
             "/alldeals — Saari deals ki poori list",
             "/leaderboard — Today + All-time top dealer/earner",
