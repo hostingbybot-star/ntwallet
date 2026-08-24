@@ -625,7 +625,7 @@ def my_status_text(update: Update):
         f"  {pe('💰')} <b>➤ {totals['USDT']:g} USDT</b>\n"
         f"  {pe('🤑')} <b>➤ {totals['INR']:g} ₹</b>\n"
         "──────────────────\n"
-        f"{pe('📱')} <b>Escrow Bot for {esc(BRAND)}</b>\n"
+        f"{pe('📱')} <b>Escrow Bot for @tr4degc</b>\n"
         f"{pe('💤')} <b>Provided by {esc(PROVIDER)}!</b>"
     )
 
