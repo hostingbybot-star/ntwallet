@@ -39,7 +39,23 @@ OWNER_IDS = set(
     if x.strip().isdigit()
 )
 
+# ===========================
+# Custom Username Aliases
+# ===========================
+
 ADMIN_ALIASES = {}
+
+if username_aliases_coll is not None:
+    for doc in username_aliases_coll.find({}):
+        try:
+            ADMIN_ALIASES[int(doc["_id"])] = doc["username"]
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    print(
+        f"✅ [NTescrowbot] "
+        f"{len(ADMIN_ALIASES)} custom username alias(es) load hue"
+    )
 
 mongo_client = MongoClient(MONGO_URI) if MONGO_URI else None
 mongo_db = mongo_client["escrow_bots"] if mongo_client else None
@@ -48,6 +64,12 @@ coll = mongo_db["deals_ntescrowbot"] if mongo_db is not None else None
 meta_coll = mongo_db["meta_ntescrowbot"] if mongo_db is not None else None
 admins_coll = mongo_db["bot_admins_ntescrowbot"] if mongo_db is not None else None
 users_coll = mongo_db["broadcast_users_ntescrowbot"] if mongo_db is not None else None
+
+username_aliases_coll = (
+    mongo_db["username_aliases_ntescrowbot"]
+    if mongo_db is not None
+    else None
+)
 
 DEALS = {}
 
@@ -245,15 +267,29 @@ def extract_amount(text):
 
 
 def resolve_username(update: Update):
-    user_id = update.effective_user.id
+    user = update.effective_user
 
+    if not user:
+        return "-"
+
+    user_id = user.id
+
+    # Owner-set custom username has highest priority.
     if user_id in ADMIN_ALIASES:
-        return "@" + ADMIN_ALIASES[user_id]
+        username = str(ADMIN_ALIASES[user_id]).strip()
 
-    if update.effective_user.username:
-        return "@" + update.effective_user.username
+        if username:
+            if not username.startswith("@"):
+                username = "@" + username
 
-    return update.effective_user.first_name
+            return username
+
+    # Normal Telegram username.
+    if user.username:
+        return "@" + user.username
+
+    # Fallback if user has no Telegram username.
+    return user.first_name or str(user_id)
 
 
 # ===========================
@@ -1527,6 +1563,158 @@ async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+
+# ===========================
+# /setusername
+# Owner Only
+# ===========================
+
+async def setusername_cmd(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    # --------------------------------
+    # HARD OWNER-ONLY CHECK
+    # --------------------------------
+    if not update.effective_user:
+        return
+
+    if update.effective_chat.type != "private":
+        return
+
+    if not is_owner(update.effective_user.id):
+        # Normal users/admins ko koi response bhi nahi.
+        return
+
+    target_id = None
+    username = None
+
+    # --------------------------------
+    # Method 1:
+    # Reply to user's message
+    #
+    # /setusername NewUsername
+    # --------------------------------
+    if update.message.reply_to_message:
+        replied_user = (
+            update.message.reply_to_message.from_user
+        )
+
+        if replied_user:
+            target_id = replied_user.id
+
+        if context.args:
+            username = context.args[0].strip()
+
+    # --------------------------------
+    # Method 2:
+    #
+    # /setusername 123456789 NewUsername
+    # --------------------------------
+    elif len(context.args) >= 2:
+        if context.args[0].isdigit():
+            target_id = int(context.args[0])
+            username = context.args[1].strip()
+
+    # --------------------------------
+    # Invalid usage
+    # --------------------------------
+    else:
+        await update.message.reply_text(
+            "<b>Usage:</b>\n\n"
+            "<code>/setusername 123456789 NewUsername</code>\n\n"
+            "<b>Ya kisi user ke message par reply:</b>\n"
+            "<code>/setusername NewUsername</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # --------------------------------
+    # Validate target ID
+    # --------------------------------
+    if target_id is None:
+        await update.message.reply_text(
+            "<b>❌ Valid user ID nahi mili.</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # --------------------------------
+    # Validate username
+    # --------------------------------
+    if not username:
+        await update.message.reply_text(
+            "<b>❌ Username missing hai.</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Remove @ if owner included it.
+    username = username.lstrip("@").strip()
+
+    # --------------------------------
+    # Telegram-style username validation
+    # --------------------------------
+    if not re.fullmatch(
+        r"[A-Za-z0-9_]{3,32}",
+        username,
+    ):
+        await update.message.reply_text(
+            "<b>❌ Invalid username.</b>\n\n"
+            "Username me sirf:\n"
+            "• A-Z\n"
+            "• a-z\n"
+            "• 0-9\n"
+            "• _\n\n"
+            "Allowed length: 3-32 characters.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Store without @.
+    ADMIN_ALIASES[target_id] = username
+
+    # --------------------------------
+    # Persist in MongoDB
+    # --------------------------------
+    if username_aliases_coll is not None:
+        username_aliases_coll.update_one(
+            {"_id": target_id},
+            {
+                "$set": {
+                    "username": username,
+                    "updated_by": update.effective_user.id,
+                    "updated_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+                }
+            },
+            upsert=True,
+        )
+
+    # --------------------------------
+    # Optional: update broadcast user
+    # --------------------------------
+    if users_coll is not None:
+        users_coll.update_one(
+            {"_id": target_id},
+            {
+                "$set": {
+                    "custom_username": username,
+                }
+            },
+        )
+
+    await update.message.reply_text(
+        f"✅ <b>Username successfully set.</b>\n\n"
+        f"👤 <b>User ID:</b> "
+        f"<code>{target_id}</code>\n"
+        f"📝 <b>Username:</b> "
+        f"<b>@{esc(username)}</b>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 # ===========================
 # /form
 # ===========================
@@ -2740,6 +2928,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>👑 Owner Commands</b>",
             "<b>/addadmin — New bot admin add karo</b>",
             "<b>/removeadmin — Bot admin remove karo</b>",
+             "<b>/setusername — Kisi user ka custom username set karo</b>",
         ]
 
     await update.message.reply_text(
@@ -2906,6 +3095,13 @@ def main():
         CommandHandler(
             "settradeid",
             settradeid_cmd,
+        )
+    )
+
+    app.add_handler(
+        CommandHandler(
+            "setusername",
+            setusername_cmd,
         )
     )
 
