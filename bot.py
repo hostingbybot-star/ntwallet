@@ -1345,7 +1345,7 @@ def payment_received_text(tid, deal):
     )
 
     return (
-        "{pe('😐')} <b>Payment received!</b>\n"
+        f"{pe('😐')} <b>Payment received!</b>\n"
         "─────────────────\n"
         f"➥ <b>ID:</b> <code>{esc(tid)}</code>\n"
         f"➥ <b>Buyer:</b> {esc(deal['buyer'])}\n"
@@ -1379,7 +1379,7 @@ def completed_text(tid, deal):
     )
 
     return (
-        "{pe('😐')} <b>Escrow deal done!</b>\n"
+        f"{pe('😐')} <b>Escrow deal done!</b>\n"
         "─────────────────\n"
         f"➥ <b>ID:</b> <code>{esc(tid)}</code>\n"
         f"➥ <b>Buyer:</b> {esc(deal['buyer'])}\n"
@@ -1402,7 +1402,7 @@ def refunded_text(tid, deal):
     )
 
     return (
-        "{pe('😐')} <b>Escrow deal refunded!</b>\n"
+        f"{pe('😐')} <b>Escrow deal refunded!</b>\n"
         "─────────────────\n"
         f"➥ <b>ID:</b> <code>{esc(tid)}</code>\n"
         f"➥ <b>Buyer:</b> {esc(deal['buyer'])}\n"
@@ -1548,7 +1548,7 @@ async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        "{pe('🛡️')} <b>What type of deal?</b>\n\n"
+        f"{pe('🛡️')} <b>What type of deal?</b>\n\n"
         "➤ <b>Select the currency below:</b>",
         parse_mode=ParseMode.HTML,
         reply_markup=currency_kb(),
