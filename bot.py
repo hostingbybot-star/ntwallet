@@ -193,11 +193,11 @@ def next_trade_id():
     else:
         seq = len(DEALS) + 1
 
-    tid = f"DL-NTWALLET-{seq}"
+    tid = f"DL-TR4DE-{seq}"
 
     while tid in DEALS:
         seq += 1
-        tid = f"DL-NTWALLET-{seq}"
+        tid = f"DL-TR4DE-{seq}"
 
     return tid
 
@@ -2148,7 +2148,7 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if (
         args
         and re.fullmatch(
-            r"DL-NTWALLET-\d+",
+            r"DL-TR4DE-\d+"
             args[0],
             re.I,
         )
@@ -2157,7 +2157,7 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif update.message.reply_to_message:
         m = re.search(
-            r"\b(DL-NTWALLET-\d+)\b",
+            r"\b(DL-TR4DE-\d+)\b",
             update.message.reply_to_message.text or "",
             re.I,
         )
@@ -2189,8 +2189,8 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not tid:
         await update.message.reply_text(
             "<b>Usage:</b>\n"
-            "<code>/close DL-NTWALLET-1</code>\n"
-            "<code>/close DL-NTWALLET-1 refund</code>\n"
+            "<code>/close DL-TR4DE-1</code>\n"
+            "<code>/close DL-TR4DE-1 refund</code>\n"
             "<code>/close 50</code> — "
             "<b>custom amount</b> "
             "(reply to deal message)",
@@ -2407,7 +2407,7 @@ async def deal_lookup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
             "<b>Usage:</b> "
-            "<code>/deal DL-NTWALLET-5</code>",
+            "<code>/deal DL-TR4DE-5</code>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -2497,6 +2497,49 @@ async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def settradeid_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if (
+        update.effective_chat.type != "private"
+        or not is_owner(update.effective_user.id)
+    ):
+        return
+
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text(
+            "<b>Usage:</b> <code>/settradeid 1164</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    new_seq = int(context.args[0])
+
+    if new_seq <= 0:
+        await update.message.reply_text(
+            "<b>❌ Trade ID number valid nahi hai.</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if meta_coll is None:
+        await update.message.reply_text(
+            "<b>❌ MongoDB required hai.</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    meta_coll.update_one(
+        {"_id": "trade_counter"},
+        {"$set": {"seq": new_seq - 1}},
+        upsert=True,
+    )
+
+    await update.message.reply_text(
+        f"✅ <b>Next Trade ID set ho gayi:</b>\n"
+        f"<code>DL-TR4DE-{new_seq}</code>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if (
         update.effective_chat.type != "private"
@@ -2550,6 +2593,7 @@ async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>ab admin nahi raha.</b>",
         parse_mode=ParseMode.HTML,
     )
+
 
 
 async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2682,7 +2726,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>/close — Deal complete/refund karo</b>",
             "<b>/alldeals — Saari deals ki list</b>",
             "<b>/leaderboard — Today + All-time leaderboard</b>",
-            "<b>/deal &lt;DL-NTWALLET-N&gt; — Deal detail</b>",
+            "<b>/deal &lt;DL-TR4DE-N&gt; — Deal detail</b>",
             "<b>/admins — Bot admins ki list</b>",
             "<b>/broadcast &lt;message&gt; — Broadcast</b>",
         ]
@@ -2853,6 +2897,12 @@ def main():
         CommandHandler(
             "addadmin",
             addadmin_cmd,
+        )
+    )
+    app.add_handler(
+        CommandHandler(
+            "settradeid",
+            settradeid_cmd,
         )
     )
 
