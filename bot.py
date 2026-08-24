@@ -39,23 +39,7 @@ OWNER_IDS = set(
     if x.strip().isdigit()
 )
 
-# ===========================
-# Custom Username Aliases
-# ===========================
 
-ADMIN_ALIASES = {}
-
-if username_aliases_coll is not None:
-    for doc in username_aliases_coll.find({}):
-        try:
-            ADMIN_ALIASES[int(doc["_id"])] = doc["username"]
-        except (KeyError, TypeError, ValueError):
-            continue
-
-    print(
-        f"✅ [NTescrowbot] "
-        f"{len(ADMIN_ALIASES)} custom username alias(es) load hue"
-    )
 
 mongo_client = MongoClient(MONGO_URI) if MONGO_URI else None
 mongo_db = mongo_client["escrow_bots"] if mongo_client else None
@@ -80,6 +64,24 @@ if coll is not None:
 
     print(f"✅ [NTescrowbot] {len(DEALS)} deal(s) Mongo se load hui")
 
+
+# ===========================
+# Custom Username Aliases
+# ===========================
+
+ADMIN_ALIASES = {}
+
+if username_aliases_coll is not None:
+    for doc in username_aliases_coll.find({}):
+        try:
+            ADMIN_ALIASES[int(doc["_id"])] = doc["username"]
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    print(
+        f"✅ [NTescrowbot] "
+        f"{len(ADMIN_ALIASES)} custom username alias(es) load hue"
+    )
 
 # ===========================
 # Bot admins
