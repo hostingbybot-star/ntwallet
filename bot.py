@@ -609,7 +609,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         currency = data.rsplit(":", 1)[1].upper()
         state = get_nt_state(context, update)
         if not state or state.get("step") != "currency" or currency not in SUPPORTED_CURRENCIES:
-            await query.answer("Start again with /add", show_alert=True)
+            await query.answer("Start again with /form", show_alert=True)
             return
         state["currency"] = currency
         state["step"] = "amount"
@@ -909,6 +909,11 @@ def pop_nt_state(context, update):
 
 
 async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Only handles the one remaining text step of the /form wizard: waiting
+    for the deal amount after a currency button was tapped. Once the amount
+    is in, the prefilled template is posted and the wizard state is cleared —
+    actually creating the deal happens later via /add replying to the
+    (now buyer/seller/item/terms-filled) template, not by watching chat text."""
     if not update.message or not update.message.text:
         return
 
@@ -916,114 +921,34 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     state = get_nt_state(context, update)
 
-    # Step 1: amount
-    if state and state.get("step") == "amount":
-        amount = extract_amount(text)
-        if amount <= 0:
-            await update.message.reply_text(
-                "❌ Valid amount bhejo.\n"
-                "Example: <code>50</code> or <code>50.5</code>",
-                parse_mode=ParseMode.HTML,
-            )
-            return
+    if not state or state.get("step") != "amount":
+        return
 
-        state["amount"] = amount
-        state["step"] = "form"
-        set_nt_state(context, update, state)
-
+    amount = extract_amount(text)
+    if amount <= 0:
         await update.message.reply_text(
-            nt_form_text(state["currency"], amount, state["escrower"]),
-            parse_mode=ParseMode.HTML,
-        )
-        await update.message.reply_text(
-            "📝 <b>Form fill karke new message me bhejo.</b>\n\n"
-            "Buyer, Seller, Item aur Terms required hain.\n"
-            "Example:\n\n"
-            "<code>➥ Deal Type: USDT\n"
-            "➥ Buyer : @piyush_ff\n"
-            "➥ Seller : @ChainNvr\n"
-            "➥ Item : usdt\n"
-            "➥ Amount : 50 USDT\n"
-            "➥ Terms : no</code>",
+            "❌ Valid amount bhejo.\n"
+            "Example: <code>50</code> or <code>50.5</code>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # Step 2: completed form — either from the /add wizard ("form", which
-    # already has a currency+amount picked) or from /form's one-shot paste
-    # ("form_direct", which has neither yet).
-    if not state or state.get("step") not in ("form", "form_direct"):
-        return
-
-    parsed, error = parse_nt_form(text)
-    if not parsed:
-        await update.message.reply_text(
-            "❌ <b>Form read nahi hua.</b>\n\n"
-            f"Reason: {esc(error or 'Unknown error')}\n\n"
-            "Isi format me complete form bhejo:\n"
-            "<code>➥ Deal Type: USDT\n"
-            "➥ Buyer : @piyush_ff\n"
-            "➥ Seller : @ChainNvr\n"
-            "➥ Item : usdt\n"
-            "➥ Amount : 50 USDT\n"
-            "➥ Terms : no</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    # Wizard values cannot be silently changed by the copied form.
-    # (Doesn't apply to /form's "form_direct" — there is no pre-picked
-    # currency/amount to cross-check there, the form is the source of truth.)
-    if state["step"] == "form":
-        if parsed["currency"] != state["currency"]:
-            await update.message.reply_text(
-                f"❌ Deal Type <b>{esc(parsed['currency'])}</b> hai, "
-                f"lekin wizard me <b>{esc(state['currency'])}</b> selected tha.\n"
-                "Dobara /add chalao.",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-
-        if abs(parsed["amount"] - float(state["amount"])) > 1e-9:
-            await update.message.reply_text(
-                f"❌ Amount <b>{esc(str(parsed['amount']))}</b> hai, "
-                f"lekin wizard amount <b>{esc(str(state['amount']))}</b> tha.\n"
-                "Dobara /add chalao.",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-
-    tid = next_trade_id()
-    currency = parsed["currency"]
-    amount = float(parsed["amount"])
-    fee_percent = DEFAULT_FEE_PERCENT
-    fee_amount = amount * fee_percent / 100
-
-    DEALS[tid] = {
-        "buyer": parsed["buyer"],
-        "seller": parsed["seller"],
-        "detail": parsed["item"],
-        "item": parsed["item"],
-        "terms": parsed["terms"],
-        "amount": amount,
-        "release": max(0, amount - fee_amount),
-        "fee_percent": fee_percent,
-        "currency": currency,
-        "status": "ACTIVE",
-        "escrowed_by": state["escrower"],
-        "created_by_id": state["creator_id"],
-        "chat_id": state["chat_id"],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "votes": {"release": [], "refund": []},
-    }
-
-    save_deal(tid)
-    pop_nt_state(context, update)
+    currency = state["currency"]
+    escrower = state["escrower"]
+    pop_nt_state(context, update)  # wizard's job is done; /add finalizes later
 
     await update.message.reply_text(
-        payment_received_text(tid, DEALS[tid]),
+        nt_form_text(currency, amount, escrower),
         parse_mode=ParseMode.HTML,
-        reply_markup=deal_action_kb(tid),
+    )
+    await update.message.reply_text(
+        "📝 <b>Upar wale form ko copy karke Buyer, Seller, Item aur Terms fill karo, "
+        "phir naya message bhejo.</b>\n\n"
+        "Fill hone ke baad usi (apne bheje hue) message par reply karke:\n"
+        "<code>/add</code> — form me jo amount hai wahi use hoga\n"
+        "<code>/add 500</code> — custom amount (500) use hoga, jitna chahiye utna\n\n"
+        "Deal create hote hi niche Release/Refund buttons aa jayenge.",
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -1043,8 +968,9 @@ async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shortcut for admins who'd rather paste one fully-filled form than go
-    through the /add currency+amount wizard step by step."""
+    """Start the guided deal template: pick currency -> enter amount ->
+    bot posts a form with Deal Type & Amount already filled in, ready for
+    the admin to add Buyer/Seller/Item/Terms and send back."""
     if not update.message:
         return
 
@@ -1055,38 +981,6 @@ async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     remember_user(update)
-    escrower = resolve_username(update)
-
-    set_nt_state(context, update, {
-        "step": "form_direct",
-        "escrower": escrower,
-        "creator_id": update.effective_user.id,
-        "chat_id": update.effective_chat.id,
-    })
-
-    await update.message.reply_text(
-        f"<b>{FORM_TITLE}</b> :\n\n"
-        "➥ Deal Type: \n"
-        "➥ Buyer :\n"
-        "➥ Seller : \n"
-        "➥ Item : \n"
-        "➥ Amount : \n"
-        "➥ Terms : \n\n"
-        f"🔒 Escrowed by {esc(escrower)}",
-        parse_mode=ParseMode.HTML,
-    )
-
-# ===========================
-# /add
-# ===========================
-
-async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    allowed, reason = await add_close_allowed(update, context)
-    if not allowed:
-        if reason:
-            await update.message.reply_text(reason)
-        return
-
     set_nt_state(context, update, {
         "step": "currency",
         "escrower": resolve_username(update),
@@ -1098,6 +992,86 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML,
         reply_markup=currency_kb(),
     )
+
+# ===========================
+# /add — finalize a deal from a filled-in form
+# ===========================
+
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reply to a filled-in deal form (from /form, or hand-typed in the
+    same layout) with /add to actually create the deal.
+
+    /add           -> uses the Amount already written in the form
+    /add 500       -> overrides the amount with a custom value (500)
+    """
+    allowed, reason = await add_close_allowed(update, context)
+    if not allowed:
+        if reason:
+            await update.message.reply_text(reason)
+        return
+
+    raw_text = (
+        update.message.reply_to_message.text
+        if update.message.reply_to_message
+        else ""
+    )
+
+    if not raw_text.strip():
+        await update.message.reply_text(
+            "❌ Filled hue deal-form wale message par reply karke <code>/add</code> bhejo.\n\n"
+            "Pehle <code>/form</code> se template lo, Buyer/Seller/Item/Terms fill karke "
+            "bhejo, phir usi message par reply karke <code>/add</code> (ya "
+            "<code>/add 500</code> custom amount ke liye) chalao.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    parsed, error = parse_nt_form(raw_text)
+    if not parsed:
+        await update.message.reply_text(
+            f"❌ <b>Form read nahi hua.</b>\n\nReason: {esc(error or 'Unknown error')}\n\n"
+            "Deal Type, Buyer, Seller, Item, Amount aur Terms — sab fields fill hone chahiye.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    currency = parsed["currency"]
+    amount_val = parsed["amount"]
+
+    if context.args:
+        custom_amount = extract_amount(context.args[0])
+        if custom_amount > 0:
+            amount_val = custom_amount
+
+    tid = next_trade_id()
+    creator_username = resolve_username(update)
+    fee_percent = DEFAULT_FEE_PERCENT
+    fee_amount = amount_val * fee_percent / 100
+
+    DEALS[tid] = {
+        "buyer": parsed["buyer"],
+        "seller": parsed["seller"],
+        "detail": parsed["item"],
+        "item": parsed["item"],
+        "terms": parsed["terms"],
+        "amount": amount_val,
+        "release": max(0, amount_val - fee_amount),
+        "fee_percent": fee_percent,
+        "currency": currency,
+        "status": "ACTIVE",
+        "escrowed_by": creator_username,
+        "created_by_id": update.effective_user.id,
+        "chat_id": update.effective_chat.id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "votes": {"release": [], "refund": []},
+    }
+    save_deal(tid)
+
+    await update.message.reply_text(
+        payment_received_text(tid, DEALS[tid]),
+        parse_mode=ParseMode.HTML,
+        reply_markup=deal_action_kb(tid),
+    )
     try:
         await update.message.delete()
     except Exception:
@@ -1105,14 +1079,14 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bail out of a stuck /add or /form wizard."""
+    """Bail out of a stuck /form wizard."""
     if not update.message:
         return
     state = pop_nt_state(context, update)
     if state:
-        await update.message.reply_text("❌ Deal creation cancelled.")
+        await update.message.reply_text("❌ Form wizard cancelled.")
     else:
-        await update.message.reply_text("Koi in-progress deal creation nahi hai.")
+        await update.message.reply_text("Koi in-progress /form wizard nahi hai.")
 
 
 # ===========================
@@ -1548,9 +1522,9 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += [
             "",
             "<b>🛡 Admin Commands</b> (private chat me hi kaam karenge)",
-            "/add — New NTwallet interactive escrow deal (guided steps)",
-            "/form — Paste one fully-filled deal form directly",
-            "/cancel — Cancel an in-progress /add or /form",
+            "/form — Currency+amount wizard, deta hai prefilled template",
+            "/add — Filled form wale message pe reply karke deal finalize karo (ya /add 500 custom amount)",
+            "/cancel — Cancel an in-progress /form wizard",
             "/close — Dual-confirmed deal release/refund",
             "/alldeals — Saari deals ki poori list",
             "/leaderboard — Today + All-time top dealer/earner",
