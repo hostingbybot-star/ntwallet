@@ -1363,7 +1363,7 @@ def payment_received_text(tid, deal):
 
 def confirm_prompt_text(deal):
     return (
-        f"✅ <b>{esc(deal['buyer'])} and "
+        f"{pe('✅')} <b>{esc(deal['buyer'])} and "
         f"{esc(deal['seller'])} confirm the button "
         f"below after deal completion and discussion!</b>"
     )
