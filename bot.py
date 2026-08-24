@@ -2729,6 +2729,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>/deal &lt;DL-TR4DE-N&gt; — Deal detail</b>",
             "<b>/admins — Bot admins ki list</b>",
             "<b>/broadcast &lt;message&gt; — Broadcast</b>",
+            "<b>/settradeid 1164</b>",
         ]
 
     if is_owner(uid):
