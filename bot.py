@@ -1027,7 +1027,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=deal["chat_id"],
                 text=(
-                    f"{pe("😐")} <b>Buyer {esc(deal['buyer'])} "
+                    f"{pe('😐')} <b>Buyer {esc(deal['buyer'])} "
                     f"& Seller {esc(deal['seller'])} "
                     f"agreed to {label}.</b>\n\n"
                     f"<b>Dear {esc(deal['escrowed_by'])}, "
@@ -1239,7 +1239,7 @@ def nt_form_text(currency, amount):
         f"➥ <b>Amount:</b> {esc(fmt(amount, currency))}\n"
         "➥ <b>Holding:</b>\n"
         "➥ <b>Terms:</b>\n\n"
-        f"<b>{pe("🔒")} Escrowed by {esc(ESCROW_OWNER)}</b>"
+        f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>"
     )
 
 
@@ -1345,7 +1345,7 @@ def payment_received_text(tid, deal):
     )
 
     return (
-        "{pe("😐")} <b>Payment received!</b>\n"
+        "{pe('😐')} <b>Payment received!</b>\n"
         "─────────────────\n"
         f"➥ <b>ID:</b> <code>{esc(tid)}</code>\n"
         f"➥ <b>Buyer:</b> {esc(deal['buyer'])}\n"
@@ -1356,7 +1356,7 @@ def payment_received_text(tid, deal):
         f"➥ <b>Start Time:</b> {dt.strftime('%H:%M:%S')}\n"
         f"   <b>[ {dt.strftime('%d %B %Y')} ]</b>\n"
         "─────────────────\n"
-        f"<b>{pe("🔒")} Escrowed by {esc(ESCROW_OWNER)}</b>\n"
+        f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>\n"
         f"<b>{pe('⭐️')} Provided by {esc(PROVIDER)}</b>"
     )
 
@@ -1379,7 +1379,7 @@ def completed_text(tid, deal):
     )
 
     return (
-        "{pe("😐")} <b>Escrow deal done!</b>\n"
+        "{pe('😐')} <b>Escrow deal done!</b>\n"
         "─────────────────\n"
         f"➥ <b>ID:</b> <code>{esc(tid)}</code>\n"
         f"➥ <b>Buyer:</b> {esc(deal['buyer'])}\n"
@@ -1391,7 +1391,7 @@ def completed_text(tid, deal):
         f"➥ <b>End Time:</b> {dt.strftime('%H:%M:%S')}\n"
         f"   <b>[ {dt.strftime('%d %B %Y')} ]</b>\n"
         "─────────────────\n"
-        f"<b>{pe("🔒")} Escrowed by {esc(ESCROW_OWNER)}</b>\n"
+        f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>\n"
         f"<b>{pe('⭐️')} Provided by {esc(PROVIDER)}</b>"
     )
 
@@ -1402,7 +1402,7 @@ def refunded_text(tid, deal):
     )
 
     return (
-        "{pe("😐")} <b>Escrow deal refunded!</b>\n"
+        "{pe('😐')} <b>Escrow deal refunded!</b>\n"
         "─────────────────\n"
         f"➥ <b>ID:</b> <code>{esc(tid)}</code>\n"
         f"➥ <b>Buyer:</b> {esc(deal['buyer'])}\n"
@@ -1414,7 +1414,7 @@ def refunded_text(tid, deal):
         f"➥ <b>End Time:</b> {dt.strftime('%H:%M:%S')}\n"
         f"   <b>[ {dt.strftime('%d %B %Y')} ]</b>\n"
         "─────────────────\n"
-        f"<b>{pe("🔒")} Escrowed by {esc(ESCROW_OWNER)}</b>\n"
+        f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>\n"
         f"<b>{pe('⭐️')} Provided by {esc(PROVIDER)}</b>"
     )
 
@@ -1548,7 +1548,7 @@ async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        "{pe("🛡️")} <b>What type of deal?</b>\n\n"
+        "{pe('🛡️')} <b>What type of deal?</b>\n\n"
         "➤ <b>Select the currency below:</b>",
         parse_mode=ParseMode.HTML,
         reply_markup=currency_kb(),
@@ -1778,7 +1778,7 @@ async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 
 def _hold_admin_emoji():
-    return pe("🛡️")
+    return pe('🛡️')
 
 
 async def hold_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2094,7 +2094,7 @@ async def finalize_deal(
         await context.bot.send_message(
             chat_id=chat_id,
             text=(
-                f"{pe("😐")} <b>{esc(deal['buyer'])} and "
+                f"{pe('😐')} <b>{esc(deal['buyer'])} and "
                 f"{esc(deal['seller'])} please copy "
                 f"and paste both vouches!</b>"
             ),
