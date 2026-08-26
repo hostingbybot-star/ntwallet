@@ -16,6 +16,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
     MessageHandler,
+    ChatMemberHandler,
     filters,
 )
 
@@ -28,6 +29,11 @@ load_dotenv()
 BOT_TOKEN = os.getenv("NTESCROW_BOT_TOKEN")
 BRAND = "@Tr4derz"
 PROVIDER = "@Tr4derz"
+
+# Deep-link / group configuration
+BOT_USERNAME = os.getenv("BOT_USERNAME", "NTescrowbot").lstrip("@")
+ESCROW_GROUP_ID = int(os.getenv("ESCROW_GROUP_ID", "0") or 0)
+ESCROW_GROUP_INVITE_LINK = os.getenv("ESCROW_GROUP_INVITE_LINK", "").strip()
 
 ESCROW_OWNER = os.getenv("ESCROW_OWNER_HANDLE", "@tr4degc")
 
@@ -401,6 +407,13 @@ def calculate_fee(amount, is_exchange=False):
 
 def main_menu_kb():
     rows = [
+        [
+            InlineKeyboardButton(
+                "⚡ Create Deal",
+                callback_data="create:start",
+                style="success",
+            )
+        ],
         [
             InlineKeyboardButton(
                 "✦ My status",
@@ -906,6 +919,58 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
 
+    # Deep-link: /start deal_<code>
+    if context.args and context.args[0].startswith("deal_"):
+        code = context.args[0][5:].upper()
+        found = None
+
+        for tid, deal in DEALS.items():
+            if str(deal.get("deep_code", "")).upper() == code:
+                found = (tid, deal)
+                break
+
+        if not found:
+            await update.message.reply_text(
+                "<b>❌ Deal link invalid or expired.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        tid, deal = found
+
+        if deal.get("status") != "PENDING_ACCEPTANCE":
+            if deal.get("status") == "WAITING_GROUP":
+                await update.message.reply_text(
+                    deal_invite_accepted_text(tid, deal),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=join_group_kb(tid),
+                )
+            elif deal.get("status") == "ACTIVE":
+                await update.message.reply_text(
+                    "<b>✅ This deal is already active in the escrow group.</b>",
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                await update.message.reply_text(
+                    f"<b>❌ This deal is {esc(deal.get('status', 'unavailable')).lower()}.</b>",
+                    parse_mode=ParseMode.HTML,
+                )
+            return
+
+        if update.effective_user.id == deal.get("creator_id"):
+            await update.message.reply_text(
+                "<b>❌ You are the creator of this deal. Send the link to the other party.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        await update.message.reply_text(
+            deal_invite_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+            reply_markup=deal_invite_kb(tid),
+        )
+        return
+
     await update.message.reply_text(
         welcome_text(update.effective_user.first_name),
         parse_mode=ParseMode.HTML,
@@ -919,19 +984,390 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    data = query.data
+    data = query.data or ""
+
+    # =========================================================
+    # NEW CREATE-DEAL WIZARD
+    # =========================================================
+
+    if data == "create:start":
+        set_nt_state(
+            context,
+            update,
+            {
+                "step": "deal_type",
+                "creator_id": update.effective_user.id,
+                "chat_id": update.effective_chat.id,
+            },
+        )
+        await query.answer()
+        await query.edit_message_text(
+            "Select deal type!",
+            reply_markup=create_deal_type_kb(),
+        )
+        return
+
+    if data == "create:back":
+        set_nt_state(
+            context,
+            update,
+            {
+                "step": "deal_type",
+                "creator_id": update.effective_user.id,
+                "chat_id": update.effective_chat.id,
+            },
+        )
+        await query.answer()
+        await query.edit_message_text(
+            "Select deal type!",
+            reply_markup=create_deal_type_kb(),
+        )
+        return
+
+    if data.startswith("create:type:"):
+        deal_type = data.split(":", 2)[2]
+        state = get_nt_state(context, update)
+
+        if not state or state.get("step") != "deal_type":
+            await query.answer("Start again from Create Deal.", show_alert=True)
+            return
+
+        state["deal_type"] = deal_type
+        state["step"] = "currency"
+        set_nt_state(context, update, state)
+
+        await query.answer()
+
+        if deal_type == "Crypto Exchange":
+            await query.edit_message_text(
+                "Select currency",
+                reply_markup=create_currency_kb(("TON", "USDT")),
+            )
+        elif deal_type == "NFT":
+            await query.edit_message_text(
+                "Select currency",
+                reply_markup=create_currency_kb(("INR",)),
+            )
+        else:
+            await query.edit_message_text(
+                "Select currency",
+                reply_markup=create_currency_kb(("INR",)),
+            )
+        return
+
+    if data.startswith("create:currency:"):
+        currency = data.rsplit(":", 1)[1].upper()
+        state = get_nt_state(context, update)
+
+        if not state or state.get("step") != "currency":
+            await query.answer("Start again from Create Deal.", show_alert=True)
+            return
+
+        allowed = {
+            "Crypto Exchange": {"TON", "USDT"},
+            "NFT": {"INR"},
+            "Other": {"INR"},
+        }.get(state.get("deal_type"), set())
+
+        if currency not in allowed:
+            await query.answer("Invalid currency for this deal type.", show_alert=True)
+            return
+
+        state["currency"] = currency
+        state["step"] = "role"
+        set_nt_state(context, update, state)
+
+        await query.answer()
+        await query.edit_message_text(
+            "Are you buyer or seller?",
+            reply_markup=create_role_kb(),
+        )
+        return
+
+    if data == "create:role:buyer" or data == "create:role:seller":
+        state = get_nt_state(context, update)
+
+        if not state or state.get("step") != "role":
+            await query.answer("Start again from Create Deal.", show_alert=True)
+            return
+
+        state["role"] = "buyer" if data.endswith("buyer") else "seller"
+        state["creator_username"] = resolve_username(update)
+        state["step"] = "amount"
+        set_nt_state(context, update, state)
+
+        await query.answer()
+        await query.edit_message_text(
+            f"Send deal amount in {esc(state['currency'])} :\n"
+            "<b>ex - 1, 10, 50</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_back_kb(),
+        )
+        return
+
+    if data == "create:back_role":
+        state = get_nt_state(context, update)
+        if not state:
+            await query.answer("Nothing to go back to.", show_alert=True)
+            return
+        state["step"] = "currency"
+        set_nt_state(context, update, state)
+        await query.answer()
+        await query.edit_message_text(
+            "Select currency",
+            reply_markup=create_currency_kb(
+                ("TON", "USDT") if state.get("deal_type") == "Crypto Exchange" else ("INR",)
+            ),
+        )
+        return
+
+    if data == "create:cancel":
+        pop_nt_state(context, update)
+        await query.answer("Cancelled")
+        await query.edit_message_text(
+            welcome_text(update.effective_user.first_name),
+            parse_mode=ParseMode.HTML,
+            reply_markup=main_menu_kb(),
+        )
+        return
+
+    if data == "create:confirm":
+        state = get_nt_state(context, update)
+
+        if not state or state.get("step") != "confirm":
+            await query.answer("This form is no longer active.", show_alert=True)
+            return
+
+        code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:10]
+        while f"DL-LINK-{code}" in DEALS:
+            code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:10]
+
+        tid = next_trade_id()
+        role = state["role"]
+        creator_username = state["creator_username"]
+
+        if role == "buyer":
+            buyer = creator_username
+            seller = "pending"
+        else:
+            buyer = "pending"
+            seller = creator_username
+
+        fee_percent = DEFAULT_FEE_PERCENT
+        amount = float(state["amount"])
+        fee_amount = amount * fee_percent / 100
+
+        DEALS[tid] = {
+            "buyer": buyer,
+            "seller": seller,
+            "detail": state.get("deal_type", "Other"),
+            "item": state.get("deal_type", "Other"),
+            "holding": "",
+            "terms": state["terms"],
+            "amount": amount,
+            "release": max(0, amount - fee_amount),
+            "fee_percent": fee_percent,
+            "currency": state["currency"],
+            "deal_type": state["deal_type"],
+            "role": role,
+            "status": "PENDING_ACCEPTANCE",
+            "escrowed_by": creator_username,
+            "created_by_id": update.effective_user.id,
+            "chat_id": update.effective_chat.id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "deep_code": code,
+            "creator_id": update.effective_user.id,
+            "creator_username": creator_username,
+            "buyer_id": update.effective_user.id if role == "buyer" else None,
+            "seller_id": update.effective_user.id if role == "seller" else None,
+            "buyer_joined": False,
+            "seller_joined": False,
+            "group_posted": False,
+            "votes": {"release": [], "refund": []},
+        }
+        save_deal(tid)
+
+        link = f"https://t.me/{BOT_USERNAME}?start=deal_{code}"
+
+        await query.answer("Deal link created.")
+        await query.edit_message_text(
+            f"<b>Here is Your deal Link :</b>\n\n"
+            f"{esc(link)}\n\n"
+            "<b>Send and Say Your buyer/seller to accept :</b>",
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "✈️ Open Deal Link",
+                            url=link,
+                            style="primary",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "❌ Cancel",
+                            callback_data=f"create:cancel_link:{tid}",
+                            style="danger",
+                        )
+                    ],
+                ]
+            ),
+        )
+        pop_nt_state(context, update)
+        return
+
+    if data.startswith("create:cancel_link:"):
+        tid = data.rsplit(":", 1)[1]
+        deal = DEALS.get(tid)
+
+        if not deal:
+            await query.answer("Deal not found.", show_alert=True)
+            return
+
+        if deal.get("created_by_id") != update.effective_user.id:
+            await query.answer("Only the creator can cancel this.", show_alert=True)
+            return
+
+        deal["status"] = "CANCELLED"
+        save_deal(tid)
+        await query.answer("Deal cancelled.")
+        await query.edit_message_text(
+            "❌ <b>Deal link cancelled.</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "⚡ Create Deal",
+                            callback_data="create:start",
+                            style="success",
+                        )
+                    ]
+                ]
+            ),
+        )
+        return
+
+    if data.startswith("invite:accept:") or data.startswith("invite:reject:"):
+        tid = data.rsplit(":", 1)[1]
+        deal = DEALS.get(tid)
+
+        if not deal or deal.get("status") != "PENDING_ACCEPTANCE":
+            await query.answer("Deal unavailable.", show_alert=True)
+            return
+
+        uid = update.effective_user.id
+
+        if uid == deal.get("creator_id"):
+            await query.answer("Creator cannot accept their own invite.", show_alert=True)
+            return
+
+        action = "accept" if data.startswith("invite:accept:") else "reject"
+
+        if action == "reject":
+            deal["status"] = "CANCELLED"
+            deal["rejected_by_id"] = uid
+            save_deal(tid)
+            await query.answer("Deal rejected.")
+            await query.edit_message_text(
+                "❌ <b>Deal rejected.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        # Assign the invited user to the opposite side.
+        if deal.get("role") == "buyer":
+            deal["seller_id"] = uid
+            deal["seller"] = resolve_username(update)
+        else:
+            deal["buyer_id"] = uid
+            deal["buyer"] = resolve_username(update)
+
+        deal["status"] = "WAITING_GROUP"
+        deal["accepted_by_id"] = uid
+        deal["accepted_by_username"] = resolve_username(update)
+        save_deal(tid)
+
+        await query.answer("Deal accepted.")
+        await query.edit_message_text(
+            deal_invite_accepted_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+            reply_markup=join_group_kb(tid),
+        )
+        await maybe_post_deal_to_group(context, tid, deal)
+        return
+
+    if data.startswith("group:check:"):
+        tid = data.rsplit(":", 1)[1]
+        deal = DEALS.get(tid)
+
+        if not deal or deal.get("status") not in {"WAITING_GROUP", "GROUP_READY"}:
+            await query.answer("Deal unavailable.", show_alert=True)
+            return
+
+        if not ESCROW_GROUP_ID:
+            await query.answer(
+                "Set ESCROW_GROUP_ID in .env first.",
+                show_alert=True,
+            )
+            return
+
+        member = await context.bot.get_chat_member(
+            ESCROW_GROUP_ID,
+            update.effective_user.id,
+        )
+        if member.status in {"left", "kicked"}:
+            await query.answer(
+                "Join the escrow group first.",
+                show_alert=True,
+            )
+            return
+
+        if deal.get("buyer_id") == update.effective_user.id:
+            deal["buyer_joined"] = True
+        if deal.get("seller_id") == update.effective_user.id:
+            deal["seller_joined"] = True
+
+        save_deal(tid)
+        await query.answer("Group membership checked.")
+        await maybe_post_deal_to_group(context, tid, deal)
+        return
+
+    if data.startswith("group:cancel:"):
+        tid = data.rsplit(":", 1)[1]
+        deal = DEALS.get(tid)
+
+        if not deal:
+            await query.answer("Deal not found.", show_alert=True)
+            return
+
+        if update.effective_user.id not in {
+            deal.get("creator_id"),
+            deal.get("buyer_id"),
+            deal.get("seller_id"),
+        }:
+            await query.answer("You are not part of this deal.", show_alert=True)
+            return
+
+        deal["status"] = "CANCELLED"
+        deal["cancelled_by_id"] = update.effective_user.id
+        save_deal(tid)
+        await query.answer("Deal cancelled.")
+        await query.edit_message_text(
+            "❌ <b>Deal cancelled.</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
     # -----------------------
-    # Currency
+    # Existing /form currency
     # -----------------------
-
     if data.startswith("newdeal:currency:"):
         currency = data.rsplit(":", 1)[1].upper()
 
-        state = get_nt_state(
-            context,
-            update,
-        )
+        state = get_nt_state(context, update)
 
         if (
             not state
@@ -960,17 +1396,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>ex - 1, 100, 1000</b>",
             parse_mode=ParseMode.HTML,
         )
-
         return
 
     # -----------------------
-    # Deal action
+    # Existing deal action
     # -----------------------
-
     if data.startswith("dealaction:"):
         try:
             _, tid, action = data.split(":", 2)
-
         except ValueError:
             await query.answer()
             return
@@ -1081,7 +1514,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_reply_markup(
                     reply_markup=None
                 )
-
             except Exception:
                 pass
 
@@ -1090,7 +1522,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # -----------------------
     # Dashboard navigation
     # -----------------------
-
     await query.answer()
 
     if data == "menu:back":
@@ -1102,38 +1533,26 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.HTML,
                 reply_markup=main_menu_kb(),
             )
-
         else:
             await query.edit_message_text(
                 my_status_text(update),
                 parse_mode=ParseMode.HTML,
                 reply_markup=status_kb(),
             )
-
         return
 
-    if (
-        data == "menu:my_deals"
-        or data.startswith("dealspage:")
-    ):
+    if data == "menu:my_deals" or data.startswith("dealspage:"):
         page = 0
-
         if data.startswith("dealspage:"):
-            page = int(
-                data.split(":", 1)[1]
-            )
+            page = int(data.split(":", 1)[1])
 
-        kb, total = my_deals_kb(
-            update,
-            page,
-        )
+        kb, total = my_deals_kb(update, page)
 
         if total == 0:
             text = (
                 my_deals_header_text(update)
                 + "\n\n📭 <b>Koi deal nahi mili.</b>"
             )
-
         else:
             text = my_deals_header_text(update)
 
@@ -1142,12 +1561,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML,
             reply_markup=kb,
         )
-
         return
 
     if data.startswith("dealview:"):
         _, tid, page = data.split(":", 2)
-
         deal = DEALS.get(tid)
 
         if not deal:
@@ -1163,32 +1580,19 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML,
             reply_markup=deal_view_kb(int(page)),
         )
-
         return
 
     target = None
 
-    if data in (
-        "menu:my_status",
-        "refresh:my_status",
-    ):
+    if data in ("menu:my_status", "refresh:my_status"):
         target = "my_status"
         text = my_status_text(update)
-
-    elif data in (
-        "menu:pending",
-        "refresh:pending",
-    ):
+    elif data in ("menu:pending", "refresh:pending"):
         target = "pending"
         text = pending_deals_text(update)
-
-    elif data in (
-        "menu:global",
-        "refresh:global",
-    ):
+    elif data in ("menu:global", "refresh:global"):
         target = "global"
         text = global_status_text()
-
     else:
         return
 
@@ -1197,6 +1601,298 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML,
         reply_markup=back_refresh_kb(target),
     )
+
+
+# ===========================
+# CREATE DEAL WIZARD
+# ===========================
+
+def create_deal_type_kb():
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Crypto Exchange",
+                    callback_data="create:type:Crypto Exchange",
+                    style="primary",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "NFT",
+                    callback_data="create:type:NFT",
+                    style="primary",
+                ),
+                InlineKeyboardButton(
+                    "Other",
+                    callback_data="create:type:Other",
+                    style="primary",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "Back",
+                    callback_data="menu:back",
+                    style="danger",
+                )
+            ],
+        ]
+    )
+
+
+def create_currency_kb(currencies):
+    buttons = [
+        InlineKeyboardButton(
+            currency,
+            callback_data=f"create:currency:{currency}",
+            style="success",
+        )
+        for currency in currencies
+    ]
+
+    return InlineKeyboardMarkup(
+        [
+            buttons,
+            [
+                InlineKeyboardButton(
+                    "Back",
+                    callback_data="create:back",
+                    style="danger",
+                )
+            ],
+        ]
+    )
+
+
+def create_role_kb():
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Buyer",
+                    callback_data="create:role:buyer",
+                    style="success",
+                ),
+                InlineKeyboardButton(
+                    "Seller",
+                    callback_data="create:role:seller",
+                    style="primary",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "Back",
+                    callback_data="create:back_role",
+                    style="danger",
+                )
+            ],
+        ]
+    )
+
+
+def create_back_kb():
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Back",
+                    callback_data="create:back_role",
+                    style="danger",
+                )
+            ]
+        ]
+    )
+
+
+def create_confirm_kb():
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✓ Confirm",
+                    callback_data="create:confirm",
+                    style="success",
+                ),
+                InlineKeyboardButton(
+                    "Cancel",
+                    callback_data="create:cancel",
+                    style="danger",
+                ),
+            ]
+        ]
+    )
+
+
+def deal_invite_kb(tid):
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✓ Accept",
+                    callback_data=f"invite:accept:{tid}",
+                    style="success",
+                ),
+                InlineKeyboardButton(
+                    "Reject",
+                    callback_data=f"invite:reject:{tid}",
+                    style="danger",
+                ),
+            ]
+        ]
+    )
+
+
+def join_group_kb(tid):
+    rows = []
+
+    if ESCROW_GROUP_INVITE_LINK:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "➜ Join Group",
+                    url=ESCROW_GROUP_INVITE_LINK,
+                    style="success",
+                )
+            ]
+        )
+
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "✕ Cancel",
+                callback_data=f"group:cancel:{tid}",
+                style="danger",
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(rows)
+
+
+def create_deal_preview_text(state):
+    creator = esc(state.get("creator_username", "-"))
+    if state.get("role") == "buyer":
+        buyer = creator
+        seller = "pending"
+    else:
+        buyer = "pending"
+        seller = creator
+
+    return (
+        f"<b>#NFTTraders [Escrow Form] :</b>\n\n"
+        f"➥ <b>Deal Type:</b> {esc(state.get('currency', '-'))}\n"
+        f"➥ <b>Buyer:</b> {esc(buyer)}\n"
+        f"➥ <b>Seller:</b> {esc(seller)}\n"
+        f"➥ <b>Item:</b> {esc(state.get('deal_type', 'Other'))}\n"
+        f"➥ <b>Amount:</b> {esc(fmt(state.get('amount', 0), state.get('currency', 'INR')))}\n"
+        f"➥ <b>Terms:</b> {esc(state.get('terms', '-'))}\n\n"
+        f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>"
+    )
+
+
+def deal_invite_text(tid, deal):
+    return (
+        f"<b>Deal - {esc(tid)}</b>\n\n"
+        f"<b>#NFTTraders [Escrow Form] :</b>\n\n"
+        f"➥ <b>Deal Type:</b> {esc(deal.get('currency', '-'))}\n"
+        f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
+        f"➥ <b>Seller:</b> {esc(deal.get('seller', 'pending'))}\n"
+        f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
+        f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
+        f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
+        f"<b>{pe('🔒')} Escrowed by {esc(deal.get('escrowed_by', ESCROW_OWNER))}</b>"
+    )
+
+
+def deal_invite_accepted_text(tid, deal):
+    return (
+        f"<b>Deal - {esc(tid)} Accepted ✓</b>\n\n"
+        f"{deal_invite_text(tid, deal)}\n\n"
+        "<b>Both buyer and seller must join the escrow group.</b>"
+    )
+
+
+async def maybe_post_deal_to_group(context, tid, deal):
+    if deal.get("group_posted"):
+        return
+
+    if not ESCROW_GROUP_ID:
+        return
+
+    if not deal.get("buyer_id") or not deal.get("seller_id"):
+        return
+
+    # Check both users' membership whenever this helper runs.
+    try:
+        buyer_member = await context.bot.get_chat_member(
+            ESCROW_GROUP_ID,
+            int(deal["buyer_id"]),
+        )
+        seller_member = await context.bot.get_chat_member(
+            ESCROW_GROUP_ID,
+            int(deal["seller_id"]),
+        )
+    except Exception as exc:
+        print(f"⚠️ Group membership check failed: {exc}")
+        return
+
+    active_statuses = {"member", "administrator", "creator", "restricted"}
+
+    deal["buyer_joined"] = buyer_member.status in active_statuses
+    deal["seller_joined"] = seller_member.status in active_statuses
+
+    if not (deal["buyer_joined"] and deal["seller_joined"]):
+        save_deal(tid)
+        return
+
+    deal["status"] = "ACTIVE"
+    deal["group_posted"] = True
+    deal["chat_id"] = ESCROW_GROUP_ID
+    save_deal(tid)
+
+    group_message = await context.bot.send_message(
+        chat_id=ESCROW_GROUP_ID,
+        text=deal_invite_text(tid, deal),
+        parse_mode=ParseMode.HTML,
+        reply_markup=deal_action_kb(tid),
+    )
+    deal["group_message_id"] = group_message.message_id
+    save_deal(tid)
+
+    for uid in {deal.get("buyer_id"), deal.get("seller_id")}:
+        if not uid:
+            continue
+        try:
+            await context.bot.send_message(
+                chat_id=uid,
+                text=(
+                    f"✅ <b>Both users joined the escrow group.</b>\n"
+                    f"Deal <code>{esc(tid)}</code> is now active in the group."
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+
+
+async def group_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not ESCROW_GROUP_ID or not update.chat_member:
+        return
+
+    if update.chat_member.chat.id != ESCROW_GROUP_ID:
+        return
+
+    changed_user = update.chat_member.new_chat_member.user
+    uid = changed_user.id
+
+    for tid, deal in list(DEALS.items()):
+        if deal.get("status") not in {"WAITING_GROUP", "GROUP_READY"}:
+            continue
+
+        if uid not in {deal.get("buyer_id"), deal.get("seller_id")}:
+            continue
+
+        await maybe_post_deal_to_group(context, tid, deal)
 
 
 # ===========================
@@ -1511,16 +2207,75 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_user(update)
 
     text = update.message.text.strip()
+    state = get_nt_state(context, update)
 
-    state = get_nt_state(
-        context,
-        update,
-    )
+    if not state:
+        return
 
-    if (
-        not state
-        or state.get("step") != "amount"
-    ):
+    # New Create Deal amount step
+    if state.get("step") == "amount" and state.get("deal_type"):
+        amount = extract_amount(text)
+
+        if amount <= 0:
+            await update.message.reply_text(
+                "<b>❌ Valid amount bhejo.</b>\n"
+                "<b>Example: 50 or 50.5</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        state["amount"] = amount
+        state["step"] = "terms"
+        set_nt_state(context, update, state)
+
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+        prompt = await update.message.reply_text(
+            "<b>Send deal terms :</b>\n"
+            "<b>max 30 words</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_back_kb(),
+        )
+        state["prompt_message_id"] = prompt.message_id
+        set_nt_state(context, update, state)
+        return
+
+    # New Create Deal terms step
+    if state.get("step") == "terms" and state.get("deal_type"):
+        words = text.split()
+
+        if not words:
+            return
+
+        if len(words) > 30:
+            await update.message.reply_text(
+                "<b>❌ Terms max 30 words hone chahiye.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        state["terms"] = text
+        state["step"] = "confirm"
+        set_nt_state(context, update, state)
+
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+        preview = create_deal_preview_text(state)
+        await update.message.reply_text(
+            preview,
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_confirm_kb(),
+        )
+        return
+
+    # Existing /form flow
+    if state.get("step") != "amount":
         return
 
     amount = extract_amount(text)
@@ -1535,18 +2290,10 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     currency = state["currency"]
 
-    pop_nt_state(
-        context,
-        update,
-    )
+    pop_nt_state(context, update)
 
-    # ONLY form message.
-    # Old instruction message completely removed.
     await update.message.reply_text(
-        nt_form_text(
-            currency,
-            amount,
-        ),
+        nt_form_text(currency, amount),
         parse_mode=ParseMode.HTML,
     )
 
@@ -3125,6 +3872,14 @@ def main():
         CommandHandler(
             "help",
             help_cmd,
+        )
+    )
+
+    # Group membership updates
+    app.add_handler(
+        ChatMemberHandler(
+            group_member_update,
+            ChatMemberHandler.CHAT_MEMBER,
         )
     )
 
