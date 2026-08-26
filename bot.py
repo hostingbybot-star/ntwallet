@@ -1187,7 +1187,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         save_deal(tid)
 
-        link = f"https://t.me/{BOT_USERNAME}?start=deal_{code}"
+        link = f"https://t.me/NTesorowbot?start=deal_{code}"
 
         await query.answer("Deal link created.")
         await query.edit_message_text(
@@ -1203,9 +1203,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             "✈️ Open Deal Link",
                             url=link,
                             style="primary",
-                        )
-                    ],
-                    [
+                        ),
                         InlineKeyboardButton(
                             "❌ Cancel",
                             callback_data=f"create:cancel_link:{tid}",
