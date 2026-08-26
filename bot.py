@@ -418,24 +418,28 @@ def main_menu_kb():
             InlineKeyboardButton(
                 "✦ My status",
                 callback_data="menu:my_status",
+                style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "★ My Deals Info",
                 callback_data="menu:my_deals",
+                style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "➤ My Pending Deals",
                 callback_data="menu:pending",
+                style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "✓ Escrow Global status",
                 callback_data="menu:global",
+                style="success",
             )
         ],
     ]
@@ -449,18 +453,21 @@ def status_kb():
             InlineKeyboardButton(
                 "★ My Deals Info",
                 callback_data="menu:my_deals",
+                style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "➤ My Pending Deals",
                 callback_data="menu:pending",
+                style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "🔄 Refresh",
                 callback_data="refresh:my_status",
+                style="success",
             )
         ],
     ]
@@ -474,6 +481,7 @@ def back_refresh_kb(refresh_target):
             InlineKeyboardButton(
                 "🔄 Refresh",
                 callback_data=f"refresh:{refresh_target}",
+                style="success",
             )
         ],
         [
@@ -741,6 +749,7 @@ def my_deals_kb(update: Update, page=0):
             InlineKeyboardButton(
                 tid,
                 callback_data=f"dealview:{tid}:{page}",
+                style="success",
             )
         ]
         for tid in chunk
@@ -753,6 +762,7 @@ def my_deals_kb(update: Update, page=0):
             InlineKeyboardButton(
                 "◀ Prev",
                 callback_data=f"dealspage:{page-1}",
+                style="success",
             )
         )
 
@@ -761,6 +771,7 @@ def my_deals_kb(update: Update, page=0):
             InlineKeyboardButton(
                 "Next ▶",
                 callback_data=f"dealspage:{page+1}",
+                style="success",
             )
         )
 
@@ -785,12 +796,14 @@ def deal_view_kb(page):
             InlineKeyboardButton(
                 "◀ Back to My Deals",
                 callback_data=f"dealspage:{page}",
+                style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "➤ Main Menu",
                 callback_data="menu:back",
+                style="success",
             )
         ],
     ]
@@ -1097,12 +1110,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_nt_state(context, update, state)
 
         await query.answer()
-        await query.edit_message_text(
+        edited = await query.edit_message_text(
             f"Send deal amount in {esc(state['currency'])} :\n"
             "<b>ex - 1, 10, 50</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_back_kb(),
         )
+        state["prompt_message_id"] = edited.message_id
+        set_nt_state(context, update, state)
         return
 
     if data == "create:back_role":
@@ -1118,6 +1133,24 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=create_currency_kb(
                 ("TON", "USDT") if state.get("deal_type") == "Crypto Exchange" else ("INR",)
             ),
+        )
+        return
+
+    if data == "create:amount_next":
+        state = get_nt_state(context, update)
+
+        if not state or state.get("step") != "amount_next":
+            await query.answer("This form is no longer active.", show_alert=True)
+            return
+
+        state["step"] = "terms"
+        set_nt_state(context, update, state)
+        await query.answer()
+        await query.edit_message_text(
+            "<b>Send deal terms :</b>\n"
+            "<b>max 30 words</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_back_kb(),
         )
         return
 
@@ -1612,19 +1645,19 @@ def create_deal_type_kb():
                 InlineKeyboardButton(
                     "Crypto Exchange",
                     callback_data="create:type:Crypto Exchange",
-                    style="primary",
+                    style="success",
                 )
             ],
             [
                 InlineKeyboardButton(
                     "NFT",
                     callback_data="create:type:NFT",
-                    style="primary",
+                    style="success",
                 ),
                 InlineKeyboardButton(
                     "Other",
                     callback_data="create:type:Other",
-                    style="primary",
+                    style="success",
                 ),
             ],
             [
@@ -1674,7 +1707,7 @@ def create_role_kb():
                 InlineKeyboardButton(
                     "Seller",
                     callback_data="create:role:seller",
-                    style="primary",
+                    style="success",
                 ),
             ],
             [
@@ -1698,6 +1731,27 @@ def create_back_kb():
                     style="danger",
                 )
             ]
+        ]
+    )
+
+
+def create_amount_next_kb():
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "➜ Deal Info",
+                    callback_data="create:amount_next",
+                    style="success",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Cancel",
+                    callback_data="create:cancel",
+                    style="danger",
+                )
+            ],
         ]
     )
 
@@ -2223,7 +2277,11 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         state["amount"] = amount
-        state["step"] = "terms"
+        # Keep the wizard on the amount step until the user explicitly
+        # presses the inline "Deal Info" button. This keeps the flow
+        # inside the same inline UI instead of sending a separate
+        # standalone prompt immediately.
+        state["step"] = "amount_next"
         set_nt_state(context, update, state)
 
         try:
@@ -2231,14 +2289,16 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        prompt = await update.message.reply_text(
-            "<b>Send deal terms :</b>\n"
-            "<b>max 30 words</b>",
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=state.get("prompt_message_id"),
+            text=(
+                f"<b>Amount set:</b> {esc(fmt(amount, state.get('currency', 'INR')))}\n\n"
+                "<b>Tap Deal Info to continue.</b>"
+            ),
             parse_mode=ParseMode.HTML,
-            reply_markup=create_back_kb(),
+            reply_markup=create_amount_next_kb(),
         )
-        state["prompt_message_id"] = prompt.message_id
-        set_nt_state(context, update, state)
         return
 
     # New Create Deal terms step
