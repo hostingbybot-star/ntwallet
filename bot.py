@@ -1285,7 +1285,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         }
         save_deal(tid)
 
-        link = f"https://t.me/{BOT_USERNAME}?start=deal_{code}"
+        link = f"https://t.me/NTesorowbot?start=deal_{code}"
 
         await query.answer("Deal link created.")
         await query.edit_message_text(
