@@ -1054,10 +1054,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.answer()
 
-        if deal_type == "Crypto":
-            currencies = ("TON", "USDT")
-        else:
-            currencies = ("INR",)
+        currencies = ("INR", "USDT", "TON")
 
         await query.edit_message_text(
             f"{pe('🪙')} <b>Select deal currency:</b>",
@@ -1074,11 +1071,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Start again from Create Deal.", show_alert=True)
             return
 
-        allowed = {
-            "Crypto": {"TON", "USDT"},
-            "NFT": {"INR"},
-            "Others": {"INR"},
-        }.get(state.get("deal_type"), set())
+        allowed = {"INR", "USDT", "TON"}
 
         if currency not in allowed:
             await query.answer("Invalid currency for this deal type.", show_alert=True)
@@ -1131,7 +1124,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{pe('🪙')} <b>Select deal currency:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_currency_kb(
-                ("TON", "USDT") if state.get("deal_type") == "Crypto" else ("INR",)
+                ("INR", "USDT", "TON")
             ),
         )
         return
@@ -1255,11 +1248,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.answer("Deal link created.")
         await query.edit_message_text(
-            f"<b>Here is Your deal Link :</b>\n\n"
+            f"Here is Your deal Link :\n\n"
             f"{esc(link)}\n\n"
-            "<b>Send and Say Your buyer/seller to accept :</b>",
+            "Send and Say Your buyer/seller to accept :",
             parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
+            disable_web_page_preview=False,
             reply_markup=InlineKeyboardMarkup(
                 [
                     [
@@ -1677,55 +1670,24 @@ def create_deal_type_kb():
         [
             [
                 InlineKeyboardButton(
-                    "🪙 Crypto",
+                    "Crypto",
                     callback_data="create:type:Crypto",
                     style="primary",
-                )
-            ],
-            [
+                ),
                 InlineKeyboardButton(
-                    "🖼 NFT",
+                    "NFT",
                     callback_data="create:type:NFT",
                     style="primary",
                 ),
                 InlineKeyboardButton(
-                    "📦 Others",
+                    "Others",
                     callback_data="create:type:Others",
                     style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "🔙 Back",
-                    callback_data="menu:back",
-                    style="danger",
-                )
-            ],
-        ]
-    )
-
-
-def create_currency_kb(currencies):
-    labels = {
-        "TON": "⚡ TON",
-        "USDT": "💵 USDT",
-        "INR": "🇮🇳 INR",
-    }
-    buttons = [
-        InlineKeyboardButton(
-            labels.get(currency, currency),
-            callback_data=f"create:currency:{currency}",
-            style="success",
-        )
-        for currency in currencies
-    ]
-
-    return InlineKeyboardMarkup(
-        [
-            buttons,
-            [
-                InlineKeyboardButton(
-                    "🔙 Back",
+                    "Back",
                     callback_data="create:back",
                     style="danger",
                 )
@@ -1733,6 +1695,34 @@ def create_currency_kb(currencies):
         ]
     )
 
+def create_currency_kb(currencies=("INR", "USDT", "TON")):
+    # Telegram inline-keyboard buttons cannot carry <tg-emoji> message entities.
+    # Keep the labels clean; premium emoji can still be used in the prompt text.
+    labels = {
+        "INR": "INR",
+        "USDT": "USDT",
+        "TON": "TON",
+    }
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    labels[c],
+                    callback_data=f"create:currency:{c}",
+                    style="success",
+                )
+                for c in ("INR", "USDT", "TON")
+                if c in currencies
+            ],
+            [
+                InlineKeyboardButton(
+                    "Back",
+                    callback_data="create:back",
+                    style="danger",
+                )
+            ],
+        ]
+    )
 
 def create_role_kb():
     return InlineKeyboardMarkup(
@@ -1751,7 +1741,7 @@ def create_role_kb():
             ],
             [
                 InlineKeyboardButton(
-                    "🔙 Back",
+                    "Back",
                     callback_data="create:back_role",
                     style="danger",
                 )
@@ -1765,7 +1755,7 @@ def create_back_kb(callback_data="create:back_role"):
         [
             [
                 InlineKeyboardButton(
-                    "🔙 Back",
+                    "Back",
                     callback_data=callback_data,
                     style="danger",
                 )
