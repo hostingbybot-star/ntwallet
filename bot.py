@@ -1,6 +1,7 @@
 import os
 import re
 import html
+import asyncio
 import threading
 import secrets
 from datetime import datetime, timezone
@@ -8,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from dotenv import load_dotenv
 from pymongo import MongoClient, ReturnDocument
-from telegram import Update, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update,CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
@@ -179,6 +180,30 @@ async def pin_message(bot, chat_id, message_id):
         return False
 
 
+async def replace_pinned_message(
+    bot,
+    chat_id,
+    old_message_id,
+    new_message_id,
+):
+    """
+    Old message unpin -> new message pin.
+    """
+    if old_message_id:
+        await unpin_message(
+            bot,
+            chat_id,
+            old_message_id,
+        )
+
+    if new_message_id:
+        return await pin_message(
+            bot,
+            chat_id,
+            new_message_id,
+        )
+
+    return False
 
 
 # ===========================
@@ -285,6 +310,25 @@ _LOW = ord("𝗮") - ord("a")
 _DIG = ord("𝟬") - ord("0")
 
 
+def normalize_bold(text):
+    out = []
+
+    for ch in text:
+        code = ord(ch)
+
+        if ord("𝗔") <= code <= ord("𝗭"):
+            out.append(chr(code - _UP))
+
+        elif ord("𝗮") <= code <= ord("𝘇"):
+            out.append(chr(code - _LOW))
+
+        elif ord("𝟬") <= code <= ord("𝟵"):
+            out.append(chr(code - _DIG))
+
+        else:
+            out.append(ch)
+
+    return "".join(out)
 
 
 # ===========================
@@ -339,6 +383,24 @@ def pe(emoji):
 # Charges
 # ===========================
 
+def calculate_fee(amount, is_exchange=False):
+    if is_exchange:
+        return amount * 0.025
+
+    if amount < 200:
+        return 10.0
+
+    elif amount <= 500:
+        return 20.0
+
+    elif amount <= 2000:
+        return amount * 0.04
+
+    elif amount <= 3000:
+        return amount * 0.035
+
+    else:
+        return amount * 0.03
 
 
 # ===========================
@@ -582,7 +644,7 @@ def my_status_text(update: Update):
         f"{pe('🚀')} <b>Rank ➤ #{rank}</b>\n\n"
         f"{pe('🔥')} <b>Active deals ➤ {len(active)}</b>\n\n"
         f"{pe('✅')} <b>Total Escrow's ➤ {len(completed)}</b>\n\n"
-        f"{pe('⚡️')} <b>Total Volume:</b>\n"
+        f"{pe('⚡')} <b>Total Volume:</b>\n"
         f"  {pe('🪙')} <b>➤ {totals['TON']:g} TON</b>\n"
         f"  {pe('💰')} <b>➤ {totals['USDT']:g} USDT</b>\n"
         f"  {pe('🤑')} <b>➤ {totals['INR']:g} ₹</b>\n"
@@ -936,7 +998,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Callback Router
 # ===========================
 
-async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data or ""
 
@@ -1117,6 +1179,29 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "create:back_confirm":
+        state = get_nt_state(context, update)
+
+        if not state:
+            await query.answer("Nothing to go back to.", show_alert=True)
+            return
+
+        state["step"] = "terms"
+        set_nt_state(context, update, state)
+        await query.answer()
+
+        try:
+            await query.edit_message_text(
+                f"{pe('📝')} <b>Send deal terms :</b>\\n"
+                "<b>max 30 words</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=create_back_kb("create:back_info"),
+            )
+        except Exception as exc:
+            print(f"⚠️ create:back_confirm edit failed: {exc}")
+
+        return
+
     if data == "create:cancel":
         pop_nt_state(context, update)
         await query.answer("Cancelled")
@@ -1197,10 +1282,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     [
                         InlineKeyboardButton(
-                            "Copy Link",
+                            f"{pe('©️')} Copy Link",
                             copy_text=CopyTextButton(link),
                             style="success",
-                            icon_custom_emoji_id=PE["©️"],
                         ),
                         InlineKeyboardButton(
                             "Cancel",
@@ -1337,13 +1421,13 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Both joined. Deal is now active in the group.")
             try:
                 await query.edit_message_text(
-                    f"<b>✅ Deal {esc(tid)} is ready.</b>\n\n"
-                    "Both Buyer and Seller have joined the escrow group.\n"
+                    f"<b>✅ Deal {esc(tid)} is ready.</b>\\n\\n"
+                    "Both Buyer and Seller have joined the escrow group.\\n"
                     "The deal has been posted there.",
                     parse_mode=ParseMode.HTML,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"⚠️ group:check final edit failed: {exc}")
         else:
             await query.answer("You are in the group. Waiting for the other party.")
             try:
@@ -1352,8 +1436,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.HTML,
                     reply_markup=join_group_kb(tid),
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"⚠️ group:check waiting edit failed: {exc}")
+
         return
 
     if data.startswith("group:cancel:"):
@@ -1378,6 +1463,43 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Deal cancelled.")
         await query.edit_message_text(
             "❌ <b>Deal cancelled.</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # -----------------------
+    # Existing /form currency
+    # -----------------------
+    if data.startswith("newdeal:currency:"):
+        currency = data.rsplit(":", 1)[1].upper()
+
+        state = get_nt_state(context, update)
+
+        if (
+            not state
+            or state.get("step") != "currency"
+            or currency not in SUPPORTED_CURRENCIES
+        ):
+            await query.answer(
+                "Start again with /form",
+                show_alert=True,
+            )
+            return
+
+        state["currency"] = currency
+        state["step"] = "amount"
+
+        set_nt_state(
+            context,
+            update,
+            state,
+        )
+
+        await query.answer()
+
+        await query.edit_message_text(
+            f"➤ <b>Tell me deal amount in {esc(currency)}</b>\n"
+            "<b>ex - 1, 100, 1000</b>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -1587,6 +1709,30 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Safety wrapper for all inline-button callbacks.
+
+    Any unexpected Telegram/API exception is logged and the callback
+    is answered when possible, so the user does not get a permanently
+    spinning/unresponsive button.
+    """
+    try:
+        await _callback_router_impl(update, context)
+    except Exception as exc:
+        print(f"❌ callback_router error: {type(exc).__name__}: {exc}")
+
+        query = getattr(update, "callback_query", None)
+        if query:
+            try:
+                await query.answer(
+                    "Button failed. Please try again.",
+                    show_alert=True,
+                )
+            except Exception:
+                pass
+
+
 # ===========================
 # CREATE DEAL WIZARD
 # ===========================
@@ -1695,17 +1841,23 @@ def create_confirm_kb():
         [
             [
                 InlineKeyboardButton(
-                    "Confirm",
+                    f"{pe('✅')} Confirm",
                     callback_data="create:confirm",
                     style="success",
-                    icon_custom_emoji_id=PE["✅"],
                 ),
                 InlineKeyboardButton(
                     "Cancel",
                     callback_data="create:cancel",
                     style="danger",
                 ),
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    "◀ Back",
+                    callback_data="create:back_confirm",
+                    style="danger",
+                ),
+            ],
         ]
     )
 
@@ -1736,10 +1888,9 @@ def join_group_kb(tid):
         rows.append(
             [
                 InlineKeyboardButton(
-                    "Join Group",
+                    "➜ Join Group",
                     url=ESCROW_GROUP_INVITE_LINK,
                     style="success",
-                    icon_custom_emoji_id=PE["🚀"],
                 )
             ]
         )
@@ -1757,7 +1908,7 @@ def join_group_kb(tid):
     rows.append(
         [
             InlineKeyboardButton(
-                "Cancel",
+                "✕ Cancel",
                 callback_data=f"group:cancel:{tid}",
                 style="danger",
             )
@@ -1971,8 +2122,45 @@ async def group_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # ===========================
-# Active Deal Actions
+# NT Wallet Form
 # ===========================
+
+SUPPORTED_CURRENCIES = (
+    "TON",
+    "USDT",
+    "INR",
+)
+
+DEFAULT_FEE_PERCENT = float(
+    os.getenv(
+        "DEAL_FEE_PERCENT",
+        "1.0",
+    )
+)
+
+FORM_TITLE = "#NFTTraders Escrow"
+
+
+def currency_kb():
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "TON",
+                    callback_data="newdeal:currency:TON",
+                ),
+                InlineKeyboardButton(
+                    "USDT",
+                    callback_data="newdeal:currency:USDT",
+                ),
+                InlineKeyboardButton(
+                    "INR",
+                    callback_data="newdeal:currency:INR",
+                ),
+            ]
+        ]
+    )
+
 
 def deal_action_kb(tid):
     return InlineKeyboardMarkup(
@@ -1988,6 +2176,156 @@ def deal_action_kb(tid):
                 ),
             ]
         ]
+    )
+
+
+# ===========================
+# FORM
+# ===========================
+
+def nt_form_text(currency, amount):
+    """
+    Static labels bold.
+    Actual fields blank/normal so user ke entered values
+    baad me bold nahi honge.
+    """
+
+    return (
+        f"<b>{esc(FORM_TITLE)} :</b>\n\n"
+        f"➥ <b>Deal Type:</b> {esc(currency)}\n"
+        "➥ <b>Buyer:</b>\n"
+        "➥ <b>Seller:</b>\n"
+        "➥ <b>Item:</b>\n"
+        f"➥ <b>Amount:</b> {esc(fmt(amount, currency))}\n"
+        "➥ <b>Holding:</b>\n"
+        "➥ <b>Terms:</b>\n\n"
+        f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>"
+    )
+
+
+def parse_nt_form(text):
+    """
+    Filled form parser.
+
+    User-entered values normal reh sakte hain ya bold unicode
+    me aa sakte hain. normalize_bold() unhe normal text me convert
+    kar deta hai.
+    """
+
+    text = normalize_bold(
+        text or ""
+    ).replace(
+        "\r\n",
+        "\n",
+    ).replace(
+        "\r",
+        "\n",
+    )
+
+    def get_field(label):
+        pattern = (
+            rf"(?im)^[ \t]*"
+            rf"(?:➥|➤|•|·|▪|▫|●|○|‣|-)?"
+            rf"[ \t]*{label}"
+            rf"[ \t]*:[ \t]*(.*?)[ \t]*$"
+        )
+
+        m = re.search(
+            pattern,
+            text,
+        )
+
+        return (
+            m.group(1).strip()
+            if m
+            else ""
+        )
+
+    currency = get_field(
+        r"Deal[ \t]*Type"
+    ).upper()
+
+    buyer = get_field(r"Buyer")
+    seller = get_field(r"Seller")
+    item = get_field(r"Item")
+    amount_raw = get_field(r"Amount")
+    holding = get_field(r"Holding")
+    terms = get_field(r"Terms")
+
+    if currency not in SUPPORTED_CURRENCIES:
+        return (
+            None,
+            "Deal Type missing/invalid. Use TON, USDT or INR.",
+        )
+
+    amount = extract_amount(amount_raw)
+
+    if amount <= 0:
+        return (
+            None,
+            "Amount missing/invalid.",
+        )
+
+    if not buyer:
+        return None, "Buyer missing."
+
+    if not seller:
+        return None, "Seller missing."
+
+    if not item:
+        return None, "Item missing."
+
+    if not terms:
+        return None, "Terms missing."
+
+    if not buyer.startswith("@"):
+        buyer = "@" + buyer
+
+    if not seller.startswith("@"):
+        seller = "@" + seller
+
+    return {
+        "currency": currency,
+        "buyer": buyer,
+        "seller": seller,
+        "item": item,
+        "amount": amount,
+        "holding": holding,
+        "terms": terms,
+    }, None
+
+
+# ===========================
+# ACTIVE DEAL MESSAGE
+# ===========================
+
+def payment_received_text(tid, deal):
+    dt = datetime.fromisoformat(
+        deal["created_at"]
+    )
+
+    return (
+        f"{pe('😐')} <b>Payment received!</b>\n"
+        "─────────────────\n"
+        f"➥ <b>ID:</b> <code>{esc(tid)}</code>\n"
+        f"➥ <b>Buyer:</b> {esc(deal['buyer'])}\n"
+        f"➥ <b>Seller:</b> {esc(deal['seller'])}\n"
+        f"➥ <b>Amount:</b> {esc(fmt(deal['amount'], deal['currency']))}\n"
+        f"➥ <b>Fees:</b> {deal['fee_percent']:.1f}%\n"
+        f"➥ <b>Escrower:</b> {esc(deal['escrowed_by'])}\n"
+        f"➥ <b>Start Time:</b> {dt.strftime('%H:%M:%S')}\n"
+        f"   <b>[ {dt.strftime('%d %B %Y')} ]</b>\n"
+        "─────────────────\n"
+        f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>\n"
+        f"<b>{pe('⭐️')} Provided by {esc(PROVIDER)}</b>"
+    )
+
+
+def confirm_prompt_text(deal):
+    return (
+        f"{pe('✅')} <b>{esc(deal['buyer'])} and "
+        f"{esc(deal['seller'])} confirm the button "
+        f"below after deal completion and discussion!</b>"
     )
 
 
@@ -2206,6 +2544,28 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    # Existing /form flow
+    if state.get("step") != "amount":
+        return
+
+    amount = extract_amount(text)
+
+    if amount <= 0:
+        await update.message.reply_text(
+            "<b>❌ Valid amount bhejo.</b>\n"
+            "<b>Example: 50 or 50.5</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    currency = state["currency"]
+
+    pop_nt_state(context, update)
+
+    await update.message.reply_text(
+        nt_form_text(currency, amount),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ===========================
@@ -2375,6 +2735,226 @@ async def setusername_cmd(
 
 
 # ===========================
+# /form
+# ===========================
+
+async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
+    remember_user(update)
+
+    set_nt_state(
+        context,
+        update,
+        {
+            "step": "currency",
+            "creator_id": update.effective_user.id,
+            "chat_id": update.effective_chat.id,
+        },
+    )
+
+    await update.message.reply_text(
+        f"{pe('🛡️')} <b>What type of deal?</b>\n\n"
+        "➤ <b>Select the currency below:</b>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=currency_kb(),
+    )
+
+
+# ===========================
+# /add
+# ===========================
+
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /add
+        -> form amount use karega
+
+    /add 500
+        -> custom amount use karega
+
+    IMPORTANT:
+        /add ke baad:
+        1. Filled form unpin
+        2. Payment Received message send
+        3. Payment Received message PIN
+        4. Confirmation message send
+    """
+
+    allowed, reason = await add_close_allowed(
+        update,
+        context,
+    )
+
+    if not allowed:
+        if reason:
+            await update.message.reply_text(reason)
+
+        return
+
+    reply = update.message.reply_to_message
+
+    raw_text = (
+        reply.text
+        if reply
+        else ""
+    )
+
+    if not raw_text.strip():
+        await update.message.reply_text(
+            "❌ <b>Filled deal-form wale message par "
+            "reply karke /add bhejo.</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    parsed, error = parse_nt_form(
+        raw_text
+    )
+
+    if not parsed:
+        await update.message.reply_text(
+            f"❌ <b>Form read nahi hua.</b>\n"
+            f"<b>Reason:</b> {esc(error or 'Unknown error')}",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    currency = parsed["currency"]
+
+    amount_val = parsed["amount"]
+
+    if context.args:
+        custom_amount = extract_amount(
+            context.args[0]
+        )
+
+        if custom_amount > 0:
+            amount_val = custom_amount
+
+    tid = next_trade_id()
+
+    creator_username = resolve_username(
+        update
+    )
+
+    fee_percent = DEFAULT_FEE_PERCENT
+
+    fee_amount = (
+        amount_val
+        * fee_percent
+        / 100
+    )
+
+    DEALS[tid] = {
+        "buyer": parsed["buyer"],
+        "seller": parsed["seller"],
+        "detail": parsed["item"],
+        "item": parsed["item"],
+        "holding": parsed["holding"],
+        "terms": parsed["terms"],
+        "amount": amount_val,
+        "release": max(
+            0,
+            amount_val - fee_amount,
+        ),
+        "fee_percent": fee_percent,
+        "currency": currency,
+        "status": "ACTIVE",
+        "escrowed_by": creator_username,
+        "created_by_id": update.effective_user.id,
+        "chat_id": update.effective_chat.id,
+        "created_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+        "votes": {
+            "release": [],
+            "refund": [],
+        },
+
+        # Message tracking
+        "form_message_id": (
+            reply.message_id
+            if reply
+            else None
+        ),
+        "payment_message_id": None,
+        "confirm_message_id": None,
+        "completion_message_id": None,
+    }
+
+    save_deal(tid)
+
+    # -----------------------
+    # Send ACTIVE deal message
+    # -----------------------
+
+    payment_message = await update.message.reply_text(
+        payment_received_text(
+            tid,
+            DEALS[tid],
+        ),
+        parse_mode=ParseMode.HTML,
+    )
+
+    DEALS[tid]["payment_message_id"] = (
+        payment_message.message_id
+    )
+
+    save_deal(tid)
+
+    # -----------------------
+    # UNPIN original form
+    # -----------------------
+
+    if reply:
+        await unpin_message(
+            context.bot,
+            update.effective_chat.id,
+            reply.message_id,
+        )
+
+    # -----------------------
+    # PIN Payment Received
+    # -----------------------
+
+    await pin_message(
+        context.bot,
+        update.effective_chat.id,
+        payment_message.message_id,
+    )
+
+    # -----------------------
+    # Confirmation buttons
+    # -----------------------
+
+    confirm_message = await update.message.reply_text(
+        confirm_prompt_text(
+            DEALS[tid]
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=deal_action_kb(tid),
+    )
+
+    DEALS[tid]["confirm_message_id"] = (
+        confirm_message.message_id
+    )
+
+    save_deal(tid)
+
+    # -----------------------
+    # Delete /add command
+    # -----------------------
+
+    try:
+        await update.message.delete()
+
+    except Exception:
+        pass
+
+
+# ===========================
 # /cancel
 # ===========================
 
@@ -2389,13 +2969,13 @@ async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state:
         await update.message.reply_text(
-            "<b>❌ Create Deal wizard cancelled.</b>",
+            "<b>❌ Form wizard cancelled.</b>",
             parse_mode=ParseMode.HTML,
         )
 
     else:
         await update.message.reply_text(
-            "<b>Koi in-progress Create Deal wizard nahi hai.</b>",
+            "<b>Koi in-progress /form wizard nahi hai.</b>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -3341,8 +3921,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>👤 User Commands</b>",
         "<b>/start — Dashboard kholo (private chat)</b>",
         "<b>/stats — Apna deal status dekho</b>",
-        "<b>Create Deal — Dashboard se new deal banao</b>",
-        "<b>/cancel — Create Deal wizard cancel karo</b>",
+        "<b>/form — New escrow form banao</b>",
+        "<b>/cancel — Form wizard cancel karo</b>",
         "<b>/help — Ye list dikhata hai</b>",
     ]
 
@@ -3350,6 +3930,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += [
             "",
             "<b>🛡 Admin Commands</b>",
+            "<b>/add — Filled form par reply karke deal create karo</b>",
+            "<b>/add 500 — Custom amount ke saath deal create karo</b>",
             "<b>/close — Deal complete/refund karo</b>",
             "<b>/alldeals — Saari deals ki list</b>",
             "<b>/leaderboard — Today + All-time leaderboard</b>",
@@ -3429,6 +4011,14 @@ def main():
 
     start_dummy_server()
 
+    try:
+        asyncio.get_event_loop()
+
+    except RuntimeError:
+        asyncio.set_event_loop(
+            asyncio.new_event_loop()
+        )
+
     app = (
         Application
         .builder()
@@ -3453,6 +4043,13 @@ def main():
 
     app.add_handler(
         CommandHandler(
+            "add",
+            add,
+        )
+    )
+
+    app.add_handler(
+        CommandHandler(
             "close",
             close,
         )
@@ -3462,6 +4059,13 @@ def main():
         CommandHandler(
             "hold",
             hold_cmd,
+        )
+    )
+
+    app.add_handler(
+        CommandHandler(
+            "form",
+            form_cmd,
         )
     )
 
