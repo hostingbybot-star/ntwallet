@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from dotenv import load_dotenv
 from pymongo import MongoClient, ReturnDocument
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update,CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
@@ -338,9 +338,9 @@ def normalize_bold(text):
 PE = {
     "⭐️": "6113744392323867038",
     "❤️": "5260535596941582167",
-    "💬": "5258330865674494479",
-    "🍑": "5323761960829862762",
-    "⚡️": "5938539885907415367",
+    "💬": "5260535596941582167",
+    "🍑": "5258330865674494479",
+    "⚡️": "5323761960829862762",
     "🌐": "6041705726206808304",
     "🔥": "5420315771991497307",
     "📈": "5774022692642492953",
@@ -366,6 +366,7 @@ PE = {
     "ℹ️": "5994473545650934240",
     "🔒": "6037249452824072506",
     "😐": "5895514131896733546",
+    "©️": "5877301185639091664",
 }
 
 
@@ -500,12 +501,12 @@ def welcome_text(first_name):
     return (
         f"{pe('⭐️')} <b>Welcome {esc(first_name)}!</b>\n"
         "╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍\n"
-        f"{pe('❤️')} <b>Escrow Bot for {esc(BRAND)}</b>\n"
+        f"{pe('❤️')} <b>Escrow Bot for @Tr4degc</b>\n"
         f"{pe('💬')} <b>Provided by {esc(PROVIDER)}</b>\n\n"
         f"{pe('🍑')} <b>This is Your Personal Dashboard:</b>\n"
         "╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍\n"
         f"<b>Select the option below {pe('⚡️')}</b>\n"
-        "╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍"
+        "╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍"
     )
 
 
@@ -1016,7 +1017,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.answer()
         await query.edit_message_text(
-            f"🛠 <b>Create Deal</b>\n\n<b>Select deal type:</b>",
+            f"<b>Select deal type !</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_deal_type_kb(),
         )
@@ -1034,7 +1035,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.answer()
         await query.edit_message_text(
-            f"🛠 <b>Create Deal</b>\n\n<b>Select deal type:</b>",
+            f"<b>Select deal type !</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_deal_type_kb(),
         )
@@ -1057,7 +1058,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         currencies = ("INR", "USDT", "TON")
 
         await query.edit_message_text(
-            f"{pe('🪙')} <b>Select deal currency:</b>",
+            f"<b>Select currency:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_currency_kb(currencies),
         )
@@ -1083,7 +1084,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.answer()
         await query.edit_message_text(
-            f"{pe('👤')} <b>Are you buyer or seller?</b>",
+            f"<b>Are you buyer or seller</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_role_kb(),
         )
@@ -1103,8 +1104,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.answer()
         edited = await query.edit_message_text(
-            f"{pe('💰')} <b>Send deal amount in {esc(state['currency'])} :</b>\n"
-            "<b>ex - 1, 10, 50</b>",
+            f"<b>Send deal amount in {esc(state['currency'])} :</b>\n"
+            "<code>ex - 1, 10, 50</code>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_back_kb("create:back_role"),
         )
@@ -1121,7 +1122,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_nt_state(context, update, state)
         await query.answer()
         await query.edit_message_text(
-            f"{pe('🪙')} <b>Select deal currency:</b>",
+            f"<b>Select deal currency:</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_currency_kb(
                 ("INR", "USDT", "TON")
@@ -1154,8 +1155,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_nt_state(context, update, state)
         await query.answer()
         await query.edit_message_text(
-            f"{pe('📝')} <b>Send deal info in 4-5 words:</b>\n"
-            "<b>max 30 words</b>",
+            f"<b>Send deal info in 4-5 words:</b>\n"
+            "<code>max 30 words</code>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_back_kb("create:back_amount"),
         )
@@ -1194,9 +1195,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("This form is no longer active.", show_alert=True)
             return
 
-        code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:10]
+        code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:7]
         while f"DL-LINK-{code}" in DEALS:
-            code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:10]
+            code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:7]
 
         tid = next_trade_id()
         role = state["role"]
@@ -1244,7 +1245,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         save_deal(tid)
 
-        link = f"https://t.me/{BOT_USERNAME}?start=deal_{code}"
+        link = f"https://t.me/NTesorowbot?start=deal_{code}"
 
         await query.answer("Deal link created.")
         await query.edit_message_text(
@@ -1257,12 +1258,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     [
                         InlineKeyboardButton(
-                            "✈️ Open Deal Link",
-                            url=link,
-                            style="primary",
+                            f"{pe('©️')} Copy Link",
+                            copy_text=CopyTextButton(link),
+                            style="success",
                         ),
                         InlineKeyboardButton(
-                            "❌ Cancel",
+                            "Cancel",
                             callback_data=f"create:cancel_link:{tid}",
                             style="danger",
                         )
@@ -1670,10 +1671,12 @@ def create_deal_type_kb():
         [
             [
                 InlineKeyboardButton(
-                    "Crypto",
+                    "Crypto Exchange",
                     callback_data="create:type:Crypto",
                     style="primary",
                 ),
+            ],
+            [
                 InlineKeyboardButton(
                     "NFT",
                     callback_data="create:type:NFT",
@@ -1684,7 +1687,7 @@ def create_deal_type_kb():
                     callback_data="create:type:Others",
                     style="primary",
                 ),
-            ],
+            ],    
             [
                 InlineKeyboardButton(
                     "Back",
@@ -1699,9 +1702,9 @@ def create_currency_kb(currencies=("INR", "USDT", "TON")):
     # Telegram inline-keyboard buttons cannot carry <tg-emoji> message entities.
     # Keep the labels clean; premium emoji can still be used in the prompt text.
     labels = {
-        "INR": "INR",
+        "TON": f"{pe('⚡')} TON",
         "USDT": "USDT",
-        "TON": "TON",
+        "INR": f"{pe('⭐️')} INR"       
     }
     return InlineKeyboardMarkup(
         [
@@ -1711,7 +1714,7 @@ def create_currency_kb(currencies=("INR", "USDT", "TON")):
                     callback_data=f"create:currency:{c}",
                     style="success",
                 )
-                for c in ("INR", "USDT", "TON")
+                for c in ("TON", "USDT", "INR")
                 if c in currencies
             ],
             [
@@ -1729,12 +1732,12 @@ def create_role_kb():
         [
             [
                 InlineKeyboardButton(
-                    "🟢 Buyer",
+                    "Buyer",
                     callback_data="create:role:buyer",
                     style="success",
                 ),
                 InlineKeyboardButton(
-                    "🔵 Seller",
+                    "Seller",
                     callback_data="create:role:seller",
                     style="primary",
                 ),
@@ -1769,12 +1772,12 @@ def create_confirm_kb():
         [
             [
                 InlineKeyboardButton(
-                    "✅ Confirm",
+                    f"{pe('✅')} Confirm",
                     callback_data="create:confirm",
                     style="success",
                 ),
                 InlineKeyboardButton(
-                    "❌ Cancel",
+                    "Cancel",
                     callback_data="create:cancel",
                     style="danger",
                 ),
@@ -2373,8 +2376,8 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=update.effective_chat.id,
                 message_id=prompt_id,
                 text=(
-                    f"{pe('📝')} <b>Send deal info in 4-5 words:</b>\n"
-                    "<b>max 30 words</b>"
+                    f"<b>Send deal info in 4-5 words:</b>\n"
+                    "<code>max 30 words</code>",
                 ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=create_back_kb("create:back_amount"),
