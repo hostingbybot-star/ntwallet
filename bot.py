@@ -32,7 +32,7 @@ BRAND = "@Tr4derz"
 PROVIDER = "@Tr4derz"
 
 # Deep-link / group configuration
-BOT_USERNAME = os.getenv("BOT_USERNAME", "NTescrowbot").lstrip("@")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "NTesorowbot").lstrip("@")
 ESCROW_GROUP_ID = int(os.getenv("ESCROW_GROUP_ID", "0") or 0)
 ESCROW_GROUP_INVITE_LINK = os.getenv("ESCROW_GROUP_INVITE_LINK", "").strip()
 
@@ -125,6 +125,22 @@ def admin_only_allowed(update: Update):
         return False
 
     return is_admin(update.effective_user.id)
+
+
+async def is_group_admin(bot, user_id):
+    """Return True for configured bot admins or Telegram admins of the escrow group."""
+    if is_admin(user_id):
+        return True
+
+    if not ESCROW_GROUP_ID:
+        return False
+
+    try:
+        member = await bot.get_chat_member(ESCROW_GROUP_ID, int(user_id))
+        return member.status in {"administrator", "creator"}
+    except Exception as exc:
+        print(f"⚠️ Could not verify group admin {user_id}: {exc}")
+        return False
 
 
 async def add_close_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1269,7 +1285,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         }
         save_deal(tid)
 
-        link = f"https://t.me/NTesorowbot?start=deal_{code}"
+        link = f"https://t.me/{BOT_USERNAME}?start=deal_{code}"
 
         await query.answer("Deal link created.")
         await query.edit_message_text(
@@ -1282,9 +1298,10 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                 [
                     [
                         InlineKeyboardButton(
-                            f"{pe('©️')} Copy Link",
+                            "Copy Link",
                             copy_text=CopyTextButton(link),
                             style="success",
+                            icon_custom_emoji_id=PE["©️"],
                         ),
                         InlineKeyboardButton(
                             "Cancel",
@@ -1381,6 +1398,88 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=join_group_kb(tid),
         )
         await maybe_post_deal_to_group(context, tid, deal)
+        return
+
+    if data.startswith("groupadmin:accept:") or data.startswith("groupadmin:reject:"):
+        tid = data.rsplit(":", 1)[1]
+        deal = DEALS.get(tid)
+
+        if not deal or deal.get("status") != "GROUP_PENDING_ADMIN":
+            await query.answer("Deal is no longer waiting for admin action.", show_alert=True)
+            return
+
+        uid = update.effective_user.id
+        if not await is_group_admin(context.bot, uid):
+            await query.answer("Only admin can accept or reject this deal.", show_alert=True)
+            return
+
+        action = "accept" if data.startswith("groupadmin:accept:") else "reject"
+
+        if action == "reject":
+            deal["status"] = "CANCELLED"
+            deal["rejected_by_admin_id"] = uid
+            deal["rejected_at"] = datetime.now(timezone.utc).isoformat()
+            save_deal(tid)
+
+            try:
+                await query.edit_message_text(
+                    deal_group_text(tid, deal).replace(
+                        f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>",
+                        f"❌ <b>Deal rejected by admin.</b>",
+                    ),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=None,
+                )
+            except Exception as exc:
+                print(f"⚠️ group admin reject edit failed: {exc}")
+
+            await query.answer("Deal rejected.")
+            for uid2 in {deal.get("buyer_id"), deal.get("seller_id"), deal.get("creator_id")}:
+                if not uid2:
+                    continue
+                try:
+                    await context.bot.send_message(
+                        chat_id=uid2,
+                        text=f"❌ <b>Deal {esc(tid)} was rejected by an admin.</b>",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
+            return
+
+        # Admin accepted: only now move the deal into ACTIVE state.
+        deal["status"] = "ACTIVE"
+        deal["admin_accepted_by_id"] = uid
+        deal["admin_accepted_at"] = datetime.now(timezone.utc).isoformat()
+        save_deal(tid)
+
+        try:
+            await query.edit_message_text(
+                deal_group_text(tid, deal).replace(
+                    f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>",
+                    f"{pe('✅')} <b>Deal accepted by admin.</b>",
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=deal_action_kb(tid),
+            )
+        except Exception as exc:
+            print(f"⚠️ group admin accept edit failed: {exc}")
+
+        await query.answer("Deal accepted. Release/Refund flow is now active.")
+        for uid2 in {deal.get("buyer_id"), deal.get("seller_id")}:
+            if not uid2:
+                continue
+            try:
+                await context.bot.send_message(
+                    chat_id=uid2,
+                    text=(
+                        f"{pe('✅')} <b>Deal {esc(tid)} has been accepted by admin.</b>\n\n"
+                        "The Release / Refund confirmation flow is now active in the escrow group."
+                    ),
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
         return
 
     if data.startswith("group:check:"):
@@ -1512,6 +1611,10 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             _, tid, action = data.split(":", 2)
         except ValueError:
             await query.answer()
+            return
+
+        if action not in {"release", "refund"}:
+            await query.answer("Invalid deal action.", show_alert=True)
             return
 
         deal = DEALS.get(tid)
@@ -1841,9 +1944,10 @@ def create_confirm_kb():
         [
             [
                 InlineKeyboardButton(
-                    f"{pe('✅')} Confirm",
+                    "Confirm",
                     callback_data="create:confirm",
                     style="success",
+                    icon_custom_emoji_id=PE["✅"],
                 ),
                 InlineKeyboardButton(
                     "Cancel",
@@ -1975,7 +2079,28 @@ def deal_group_text(tid, deal):
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
         f"{pe('🔒')} <b>Escrowed by {esc(deal.get('escrowed_by', ESCROW_OWNER))}</b>\n"
-        f"<b>ID:</b> <code>{esc(tid)}</code>"
+        f"<b>ID:</b> <code>{esc(tid)}</code>\n\n"
+        f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>"
+    )
+
+
+def group_admin_action_kb(tid):
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Accept",
+                    callback_data=f"groupadmin:accept:{tid}",
+                    style="success",
+                    icon_custom_emoji_id=PE["✅"],
+                ),
+                InlineKeyboardButton(
+                    "Reject",
+                    callback_data=f"groupadmin:reject:{tid}",
+                    style="danger",
+                ),
+            ]
+        ]
     )
 
 
@@ -2034,7 +2159,7 @@ async def notify_creator_accepted(context, tid, deal):
 
 
 async def maybe_post_deal_to_group(context, tid, deal):
-    if deal.get("group_posted"):
+    if deal.get("group_posted") or deal.get("group_posting"):
         return
 
     if not ESCROW_GROUP_ID:
@@ -2069,17 +2194,27 @@ async def maybe_post_deal_to_group(context, tid, deal):
         save_deal(tid)
         return
 
-    deal["status"] = "ACTIVE"
-    deal["group_posted"] = True
+    # Mark as posting so two simultaneous membership callbacks cannot create duplicate posts.
+    deal["group_posting"] = True
     deal["chat_id"] = ESCROW_GROUP_ID
     save_deal(tid)
 
-    group_message = await context.bot.send_message(
-        chat_id=ESCROW_GROUP_ID,
-        text=deal_group_text(tid, deal),
-        parse_mode=ParseMode.HTML,
-        reply_markup=deal_action_kb(tid),
-    )
+    try:
+        group_message = await context.bot.send_message(
+            chat_id=ESCROW_GROUP_ID,
+            text=deal_group_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+            reply_markup=group_admin_action_kb(tid),
+        )
+    except Exception as exc:
+        deal["group_posting"] = False
+        save_deal(tid)
+        print(f"⚠️ Could not post deal {tid} in escrow group: {exc}")
+        return
+
+    deal["group_posting"] = False
+    deal["status"] = "GROUP_PENDING_ADMIN"
+    deal["group_posted"] = True
     deal["group_message_id"] = group_message.message_id
     save_deal(tid)
 
@@ -2169,10 +2304,14 @@ def deal_action_kb(tid):
                 InlineKeyboardButton(
                     "Release",
                     callback_data=f"dealaction:{tid}:release",
+                    style="success",
+                    icon_custom_emoji_id=PE["📤"],
                 ),
                 InlineKeyboardButton(
                     "Refund",
                     callback_data=f"dealaction:{tid}:refund",
+                    style="danger",
+                    icon_custom_emoji_id=PE["🔒"],
                 ),
             ]
         ]
