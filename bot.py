@@ -383,6 +383,7 @@ PE = {
     "🔒": "6037249452824072506",
     "😐": "5895514131896733546",
     "©️": "5877301185639091664",
+    "🫱": "5985596818912712352",
 }
 
 
@@ -1947,7 +1948,7 @@ def create_confirm_kb():
                     "Confirm",
                     callback_data="create:confirm",
                     style="success",
-                    icon_custom_emoji_id=PE["✅"],
+                    icon_custom_emoji_id=PE["🫱"],
                 ),
                 InlineKeyboardButton(
                     "Cancel",
@@ -2604,7 +2605,7 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=update.effective_chat.id,
                 message_id=prompt_id,
                 text=(
-                    f"<b>Send deal info in 4-5 words:</b>\n"
+                    "<b>Send deal info in 4-5 words:</b>\n"
                     "<code>max 30 words</code>",
                 ),
                 parse_mode=ParseMode.HTML,
@@ -2641,8 +2642,8 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=update.effective_chat.id,
                 message_id=prompt_id,
                 text=(
-                    f"{pe('📝')} <b>Send deal terms :</b>\n"
-                    "<b>max 30 words</b>"
+                    "<b>Send deal terms :</b>\n"
+                    "<code>max 30 words</code>"
                 ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=create_back_kb("create:back_info"),
