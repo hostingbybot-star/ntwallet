@@ -411,9 +411,10 @@ def main_menu_kb():
     rows = [
         [
             InlineKeyboardButton(
-                f"{pe('⚡')} Create Deal",
+                "Create Deal",
                 callback_data="create:start",
                 style="success",
+                icon_custom_emoji_id=PE["⚡️"],
             )
         ],
         [
@@ -1296,10 +1297,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     [
                         InlineKeyboardButton(
-                            f"{pe('⚡')} Create Deal",
+                            "Create Deal",
                             callback_data="create:start",
                             style="success",
-                        )
+                            icon_custom_emoji_id=PE["⚡️"],
+                        ),
                     ]
                 ]
             ),
@@ -1699,20 +1701,19 @@ def create_deal_type_kb():
     )
 
 def create_currency_kb(currencies=("INR", "USDT", "TON")):
-    # Telegram inline-keyboard buttons cannot carry <tg-emoji> message entities.
-    # Keep the labels clean; premium emoji can still be used in the prompt text.
-    labels = {
-        "TON": f"{pe('⚡')} TON",
-        "USDT": "USDT",
-        "INR": f"{pe('⭐️')} INR"       
+    emoji_ids = {
+        "TON": PE["⚡️"],
+        "INR": PE["⭐️"],
     }
+
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    labels[c],
+                    c,
                     callback_data=f"create:currency:{c}",
                     style="success",
+                    icon_custom_emoji_id=emoji_ids.get(c),
                 )
                 for c in ("TON", "USDT", "INR")
                 if c in currencies
@@ -1726,7 +1727,6 @@ def create_currency_kb(currencies=("INR", "USDT", "TON")):
             ],
         ]
     )
-
 def create_role_kb():
     return InlineKeyboardMarkup(
         [
