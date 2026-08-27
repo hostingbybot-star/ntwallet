@@ -1174,7 +1174,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer()
         await query.edit_message_text(
             f"<b>Send deal info in 4-5 words:</b>\n"
-            "<code>max 30 words</code>",
+            f"<code>max 30 words</code>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_back_kb("create:back_amount"),
         )
@@ -1189,7 +1189,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         set_nt_state(context, update, state)
         await query.answer()
         await query.edit_message_text(
-            f"{pe('📝')} <b>Send deal terms :</b>\n"
+            f"<b>Send deal terms :</b>\n"
             "<b>max 30 words</b>",
             parse_mode=ParseMode.HTML,
             reply_markup=create_back_kb("create:back_info"),
@@ -1290,9 +1290,9 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
 
         await query.answer("Deal link created.")
         await query.edit_message_text(
-            f"Here is Your deal Link :\n\n"
+            f"<b>Here is Your deal Link :</b>\n"
             f"{esc(link)}\n\n"
-            "Send and Say Your buyer/seller to accept :",
+            "<b>Send and Say Your buyer/seller to accept :</b>",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=False,
             reply_markup=InlineKeyboardMarkup(
@@ -1302,7 +1302,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                             "Copy Link",
                             copy_text=CopyTextButton(link),
                             style="success",
-                            icon_custom_emoji_id=PE["©️"],
+                            # icon_custom_emoji_id=PE["©️"],
                         ),
                         InlineKeyboardButton(
                             "Cancel",
@@ -2605,8 +2605,8 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=update.effective_chat.id,
                 message_id=prompt_id,
                 text=(
-                    "<b>Send deal info in 4-5 words:</b>\n"
-                    "<code>max 30 words</code>",
+                    f"<b>Send deal info in 4-5 words:</b>\n"
+                    f"<code>max 30 words</code>",
                 ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=create_back_kb("create:back_amount"),
