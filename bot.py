@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from dotenv import load_dotenv
 from pymongo import MongoClient, ReturnDocument
-from telegram import Update,CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
@@ -45,7 +45,6 @@ OWNER_IDS = set(
     for x in os.getenv("ADMIN_IDS", "").split(",")
     if x.strip().isdigit()
 )
-
 
 
 mongo_client = MongoClient(MONGO_URI) if MONGO_URI else None
@@ -383,7 +382,7 @@ PE = {
     "🔒": "6037249452824072506",
     "😐": "5895514131896733546",
     "©️": "5877301185639091664",
-    "🫱": "5776375003280838798",
+    "🫱": "5985596818912712352",
 }
 
 
@@ -1075,7 +1074,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             currencies = ("TON", "USDT")
         else:
             currencies = ("TON", "USDT", "INR")
-            
+
         await query.answer()
         await query.edit_message_text(
             f"<b>Select currency:</b>",
@@ -1140,13 +1139,17 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             return
         state["step"] = "currency"
         set_nt_state(context, update, state)
+
+        if state.get("deal_type") == "Crypto":
+            currencies = ("TON", "USDT")
+        else:
+            currencies = ("TON", "USDT", "INR")
+
         await query.answer()
         await query.edit_message_text(
             f"<b>Select deal currency:</b>",
             parse_mode=ParseMode.HTML,
-            reply_markup=create_currency_kb(
-                ("INR", "USDT", "TON")
-            ),
+            reply_markup=create_currency_kb(currencies),
         )
         return
 
@@ -1211,7 +1214,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
 
         try:
             await query.edit_message_text(
-                f"{pe('📝')} <b>Send deal terms :</b>\\n"
+                f"{pe('📝')} <b>Send deal terms :</b>\n"
                 "<b>max 30 words</b>",
                 parse_mode=ParseMode.HTML,
                 reply_markup=create_back_kb("create:back_info"),
@@ -1304,7 +1307,6 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                             "Copy Link",
                             copy_text=CopyTextButton(link),
                             style="success",
-                            # icon_custom_emoji_id=PE["©️"],
                         ),
                         InlineKeyboardButton(
                             "Cancel",
@@ -1450,7 +1452,23 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                     pass
             return
 
-        # Admin accepted: only now move the deal into ACTIVE state.
+        # ------------------------------------------------------------
+        # Admin accepted the deal in the group.
+        #
+        # New flow (per the requested design):
+        #   1. Group post -> "✅ Deal accepted by admin." (buttons removed)
+        #   2. A fresh "Payment received!" message is sent asking the
+        #      SELLER to confirm they received the payment, with a
+        #      single green "✅ Received" button.
+        #   3. That new message is pinned (old group message is left,
+        #      the "payment" message becomes the tracked pinned msg,
+        #      matching how /add's payment_message_id is unpinned
+        #      later by finalize_deal()).
+        #   4. When the seller taps "Received", the deal auto-completes
+        #      (release), pins the "Escrow deal done!" message and
+        #      sends the two vouch messages.
+        # ------------------------------------------------------------
+
         deal["status"] = "ACTIVE"
         deal["admin_accepted_by_id"] = uid
         deal["admin_accepted_at"] = datetime.now(timezone.utc).isoformat()
@@ -1463,12 +1481,29 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                     f"{pe('✅')} <b>Deal accepted by admin.</b>",
                 ),
                 parse_mode=ParseMode.HTML,
-                reply_markup=deal_action_kb(tid),
+                reply_markup=None,
             )
         except Exception as exc:
             print(f"⚠️ group admin accept edit failed: {exc}")
 
-        await query.answer("Deal accepted. Release/Refund flow is now active.")
+        await query.answer("Deal accepted.")
+
+        payment_message = await context.bot.send_message(
+            chat_id=deal["chat_id"],
+            text=payment_confirm_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+            reply_markup=payment_confirm_kb(tid),
+        )
+
+        deal["payment_message_id"] = payment_message.message_id
+        save_deal(tid)
+
+        await pin_message(
+            context.bot,
+            deal["chat_id"],
+            payment_message.message_id,
+        )
+
         for uid2 in {deal.get("buyer_id"), deal.get("seller_id")}:
             if not uid2:
                 continue
@@ -1477,7 +1512,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                     chat_id=uid2,
                     text=(
                         f"{pe('✅')} <b>Deal {esc(tid)} has been accepted by admin.</b>\n\n"
-                        "The Release / Refund confirmation flow is now active in the escrow group."
+                        "Waiting for the seller to confirm payment receipt in the group."
                     ),
                     parse_mode=ParseMode.HTML,
                 )
@@ -1485,87 +1520,43 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                 pass
         return
 
-    if data.startswith("group:check:"):
+    if data.startswith("dealconfirm:received:"):
         tid = data.rsplit(":", 1)[1]
         deal = DEALS.get(tid)
 
-        if not deal or deal.get("status") not in {"WAITING_GROUP", "GROUP_READY"}:
+        if not deal or deal.get("status") != "ACTIVE":
             await query.answer("Deal unavailable.", show_alert=True)
             return
 
-        if not ESCROW_GROUP_ID:
+        username = resolve_username(update).lower()
+        seller = str(deal.get("seller", "")).lower()
+
+        if username != seller:
             await query.answer(
-                "Set ESCROW_GROUP_ID in .env first.",
+                "Only the Seller can confirm this.",
                 show_alert=True,
             )
             return
 
-        member = await context.bot.get_chat_member(
-            ESCROW_GROUP_ID,
-            update.effective_user.id,
-        )
-        if member.status in {"left", "kicked"}:
-            await query.answer(
-                "Join the escrow group first.",
-                show_alert=True,
+        await query.answer("Confirmed. Releasing automatically...")
+
+        try:
+            await query.edit_message_text(
+                release_auto_text(tid, deal),
+                parse_mode=ParseMode.HTML,
+                reply_markup=None,
             )
-            return
+        except Exception as exc:
+            print(f"⚠️ dealconfirm:received edit failed: {exc}")
 
-        if deal.get("buyer_id") == update.effective_user.id:
-            deal["buyer_joined"] = True
-        if deal.get("seller_id") == update.effective_user.id:
-            deal["seller_joined"] = True
+        deal["closed_by"] = resolve_username(update)
 
-        save_deal(tid)
-        await maybe_post_deal_to_group(context, tid, deal)
-
-        if deal.get("status") == "ACTIVE":
-            await query.answer("Both joined. Deal is now active in the group.")
-            try:
-                await query.edit_message_text(
-                    f"<b>✅ Deal {esc(tid)} is ready.</b>\\n\\n"
-                    "Both Buyer and Seller have joined the escrow group.\\n"
-                    "The deal has been posted there.",
-                    parse_mode=ParseMode.HTML,
-                )
-            except Exception as exc:
-                print(f"⚠️ group:check final edit failed: {exc}")
-        else:
-            await query.answer("You are in the group. Waiting for the other party.")
-            try:
-                await query.edit_message_text(
-                    deal_invite_accepted_text(tid, deal),
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=join_group_kb(tid),
-                )
-            except Exception as exc:
-                print(f"⚠️ group:check waiting edit failed: {exc}")
-
-        return
-
-    if data.startswith("group:cancel:"):
-        tid = data.rsplit(":", 1)[1]
-        deal = DEALS.get(tid)
-
-        if not deal:
-            await query.answer("Deal not found.", show_alert=True)
-            return
-
-        if update.effective_user.id not in {
-            deal.get("creator_id"),
-            deal.get("buyer_id"),
-            deal.get("seller_id"),
-        }:
-            await query.answer("You are not part of this deal.", show_alert=True)
-            return
-
-        deal["status"] = "CANCELLED"
-        deal["cancelled_by_id"] = update.effective_user.id
-        save_deal(tid)
-        await query.answer("Deal cancelled.")
-        await query.edit_message_text(
-            "❌ <b>Deal cancelled.</b>",
-            parse_mode=ParseMode.HTML,
+        await finalize_deal(
+            context,
+            tid,
+            deal,
+            mode="release",
+            closer_id=update.effective_user.id,
         )
         return
 
@@ -1607,7 +1598,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     # -----------------------
-    # Existing deal action
+    # Existing deal action (release/refund voting - kept for /add flow)
     # -----------------------
     if data.startswith("dealaction:"):
         try:
@@ -1864,7 +1855,7 @@ def create_deal_type_kb():
                     callback_data="create:type:Others",
                     style="primary",
                 ),
-            ],    
+            ],
             [
                 InlineKeyboardButton(
                     "Back",
@@ -1874,6 +1865,7 @@ def create_deal_type_kb():
             ],
         ]
     )
+
 
 def create_currency_kb(currencies=("INR", "USDT", "TON")):
     emoji_ids = {
@@ -1902,6 +1894,8 @@ def create_currency_kb(currencies=("INR", "USDT", "TON")):
             ],
         ]
     )
+
+
 def create_role_kb():
     return InlineKeyboardMarkup(
         [
@@ -2097,6 +2091,42 @@ def group_admin_action_kb(tid):
                 ),
             ]
         ]
+    )
+
+
+# ---------------------------------------------------------------------
+# Payment confirmation ("Received" button) shown after admin accepts
+# ---------------------------------------------------------------------
+
+def payment_confirm_text(tid, deal):
+    return (
+        f"{pe('✅')} <b>Payment received !</b>\n"
+        "──────────────────\n"
+        f"<b>Seller {esc(deal.get('seller', '-'))} Confirm that you have "
+        f"received the payment from {esc(deal.get('escrowed_by', '-'))} !</b>"
+    )
+
+
+def payment_confirm_kb(tid):
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ Received",
+                    callback_data=f"dealconfirm:received:{tid}",
+                    style="success",
+                )
+            ]
+        ]
+    )
+
+
+def release_auto_text(tid, deal):
+    return (
+        f"{pe('✅')} <b>Payment received !</b>\n"
+        "──────────────────\n"
+        f"<b>{esc(deal.get('escrowed_by', '-'))} - completing this "
+        f"release automatically...</b>"
     )
 
 
@@ -2605,9 +2635,7 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-
         prompt_id = state.get("prompt_message_id")
-
         if prompt_id:
             if state.get("deal_type") in ("Crypto", "NFT"):
                 await context.bot.edit_message_text(
@@ -2743,7 +2771,6 @@ async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-
 # ===========================
 # /setusername
 # Owner Only
@@ -2753,9 +2780,6 @@ async def setusername_cmd(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    # --------------------------------
-    # HARD OWNER-ONLY CHECK
-    # --------------------------------
     if not update.effective_user:
         return
 
@@ -2763,18 +2787,11 @@ async def setusername_cmd(
         return
 
     if not is_owner(update.effective_user.id):
-        # Normal users/admins ko koi response bhi nahi.
         return
 
     target_id = None
     username = None
 
-    # --------------------------------
-    # Method 1:
-    # Reply to user's message
-    #
-    # /setusername NewUsername
-    # --------------------------------
     if update.message.reply_to_message:
         replied_user = (
             update.message.reply_to_message.from_user
@@ -2786,19 +2803,11 @@ async def setusername_cmd(
         if context.args:
             username = context.args[0].strip()
 
-    # --------------------------------
-    # Method 2:
-    #
-    # /setusername 123456789 NewUsername
-    # --------------------------------
     elif len(context.args) >= 2:
         if context.args[0].isdigit():
             target_id = int(context.args[0])
             username = context.args[1].strip()
 
-    # --------------------------------
-    # Invalid usage
-    # --------------------------------
     else:
         await update.message.reply_text(
             "<b>Usage:</b>\n\n"
@@ -2809,9 +2818,6 @@ async def setusername_cmd(
         )
         return
 
-    # --------------------------------
-    # Validate target ID
-    # --------------------------------
     if target_id is None:
         await update.message.reply_text(
             "<b>❌ Valid user ID nahi mili.</b>",
@@ -2819,9 +2825,6 @@ async def setusername_cmd(
         )
         return
 
-    # --------------------------------
-    # Validate username
-    # --------------------------------
     if not username:
         await update.message.reply_text(
             "<b>❌ Username missing hai.</b>",
@@ -2829,12 +2832,8 @@ async def setusername_cmd(
         )
         return
 
-    # Remove @ if owner included it.
     username = username.lstrip("@").strip()
 
-    # --------------------------------
-    # Telegram-style username validation
-    # --------------------------------
     if not re.fullmatch(
         r"[A-Za-z0-9_]{3,32}",
         username,
@@ -2851,12 +2850,8 @@ async def setusername_cmd(
         )
         return
 
-    # Store without @.
     ADMIN_ALIASES[target_id] = username
 
-    # --------------------------------
-    # Persist in MongoDB
-    # --------------------------------
     if username_aliases_coll is not None:
         username_aliases_coll.update_one(
             {"_id": target_id},
@@ -2872,9 +2867,6 @@ async def setusername_cmd(
             upsert=True,
         )
 
-    # --------------------------------
-    # Optional: update broadcast user
-    # --------------------------------
     if users_coll is not None:
         users_coll.update_one(
             {"_id": target_id},
@@ -3411,7 +3403,7 @@ async def finalize_deal(
         save_deal(tid)
 
         # -----------------------
-        # Old active message unpin
+        # Old active/payment message unpin
         # -----------------------
 
         await unpin_message(
@@ -3965,7 +3957,6 @@ async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-
 async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not admin_only_allowed(update):
         return
@@ -4108,7 +4099,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>👑 Owner Commands</b>",
             "<b>/addadmin — New bot admin add karo</b>",
             "<b>/removeadmin — Bot admin remove karo</b>",
-             "<b>/setusername — Kisi user ka custom username set karo</b>",
+            "<b>/setusername — Kisi user ka custom username set karo</b>",
         ]
 
     await update.message.reply_text(
@@ -4188,123 +4179,23 @@ def main():
     )
 
     # Commands
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "stats",
-            mystatus_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "add",
-            add,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "close",
-            close,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "hold",
-            hold_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "form",
-            form_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "cancel",
-            cancel_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "broadcast",
-            broadcast_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "alldeals",
-            alldeals_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "leaderboard",
-            leaderboard_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "deal",
-            deal_lookup_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "addadmin",
-            addadmin_cmd,
-        )
-    )
-    app.add_handler(
-        CommandHandler(
-            "settradeid",
-            settradeid_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "setusername",
-            setusername_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "removeadmin",
-            removeadmin_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "admins",
-            admins_cmd,
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "help",
-            help_cmd,
-        )
-    )
+    app.add_handler(CommandHandler("start", start_cmd))
+    app.add_handler(CommandHandler("stats", mystatus_cmd))
+    app.add_handler(CommandHandler("add", add))
+    app.add_handler(CommandHandler("close", close))
+    app.add_handler(CommandHandler("hold", hold_cmd))
+    app.add_handler(CommandHandler("form", form_cmd))
+    app.add_handler(CommandHandler("cancel", cancel_cmd))
+    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+    app.add_handler(CommandHandler("alldeals", alldeals_cmd))
+    app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
+    app.add_handler(CommandHandler("deal", deal_lookup_cmd))
+    app.add_handler(CommandHandler("addadmin", addadmin_cmd))
+    app.add_handler(CommandHandler("settradeid", settradeid_cmd))
+    app.add_handler(CommandHandler("setusername", setusername_cmd))
+    app.add_handler(CommandHandler("removeadmin", removeadmin_cmd))
+    app.add_handler(CommandHandler("admins", admins_cmd))
+    app.add_handler(CommandHandler("help", help_cmd))
 
     # Group membership updates
     app.add_handler(
