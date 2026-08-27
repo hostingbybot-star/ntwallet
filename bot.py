@@ -411,7 +411,7 @@ def main_menu_kb():
     rows = [
         [
             InlineKeyboardButton(
-                "⚡ Create Deal",
+                f"{pe('⚡')} Create Deal",
                 callback_data="create:start",
                 style="success",
             )
@@ -1296,7 +1296,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     [
                         InlineKeyboardButton(
-                            "⚡ Create Deal",
+                            f"{pe('⚡')} Create Deal",
                             callback_data="create:start",
                             style="success",
                         )
