@@ -2606,7 +2606,7 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message_id=prompt_id,
                 text=(
                     f"<b>Send deal info in 4-5 words:</b>\n"
-                    f"<code>max 30 words</code>",
+                    f"<code>max 30 words</code>"
                 ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=create_back_kb("create:back_amount"),
