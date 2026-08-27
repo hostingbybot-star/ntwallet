@@ -1071,10 +1071,12 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         state["step"] = "currency"
         set_nt_state(context, update, state)
 
+        if deal_type == "Crypto":
+            currencies = ("TON", "USDT")
+        else:
+            currencies = ("TON", "USDT", "INR")
+            
         await query.answer()
-
-        currencies = ("INR", "USDT", "TON")
-
         await query.edit_message_text(
             f"<b>Select currency:</b>",
             parse_mode=ParseMode.HTML,
@@ -1956,13 +1958,6 @@ def create_confirm_kb():
                     style="danger",
                 ),
             ],
-            [
-                InlineKeyboardButton(
-                    "◀ Back",
-                    callback_data="create:back_confirm",
-                    style="danger",
-                ),
-            ],
         ]
     )
 
@@ -2110,10 +2105,10 @@ async def notify_deal_admins(context, tid, deal, event="accepted"):
         return
 
     if event == "accepted":
-        title = "🔔 <b>Deal Accepted</b>"
+        title = "<b>Deal Accepted</b>"
         extra = "The invited party accepted the deal."
     else:
-        title = "📌 <b>Deal Ready in Group</b>"
+        title = "<b>Deal Ready in Group</b>"
         extra = "Both parties are in the escrow group and the deal has been posted."
 
     text = (
@@ -2591,7 +2586,18 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         state["amount"] = amount
-        state["step"] = "info"
+
+        if state.get("deal_type") == "Crypto":
+            state["deal_info"] = "Crypto Exchange"
+            state["step"] = "terms"
+
+        elif state.get("deal_type") == "NFT":
+            state["deal_info"] = "NFT"
+            state["step"] = "terms"
+
+        else:
+            state["step"] = "info"
+
         set_nt_state(context, update, state)
 
         try:
@@ -2599,19 +2605,34 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        prompt_id = state.get("prompt_message_id")
-        if prompt_id:
-            await context.bot.edit_message_text(
-                chat_id=update.effective_chat.id,
-                message_id=prompt_id,
-                text=(
-                    f"<b>Send deal info in 4-5 words:</b>\n"
-                    f"<code>max 30 words</code>"
-                ),
-                parse_mode=ParseMode.HTML,
-                reply_markup=create_back_kb("create:back_amount"),
-            )
-        return
+
+    prompt_id = state.get("prompt_message_id")
+if prompt_id:
+    if state.get("deal_type") in ("Crypto", "NFT"):
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=prompt_id,
+            text=(
+                "<b>Send deal terms :</b>\n"
+                "<code>max 30 words</code>"
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_back_kb("create:back_info"),
+        )
+    else:
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=prompt_id,
+            text=(
+                "<b>Send deal info in 4-5 words:</b>\n"
+                "<code>max 30 words</code>"
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_back_kb("create:back_amount"),
+        )
+
+return
+    
 
     # New Create Deal info step
     if state.get("step") == "info" and state.get("deal_type"):
