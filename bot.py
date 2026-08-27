@@ -3,6 +3,7 @@ import re
 import html
 import asyncio
 import threading
+import secrets
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -1015,7 +1016,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.answer()
         await query.edit_message_text(
-            "Select deal type!",
+            f"🛠 <b>Create Deal</b>\n\n<b>Select deal type:</b>",
+            parse_mode=ParseMode.HTML,
             reply_markup=create_deal_type_kb(),
         )
         return
@@ -1032,7 +1034,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.answer()
         await query.edit_message_text(
-            "Select deal type!",
+            f"🛠 <b>Create Deal</b>\n\n<b>Select deal type:</b>",
+            parse_mode=ParseMode.HTML,
             reply_markup=create_deal_type_kb(),
         )
         return
@@ -1051,21 +1054,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.answer()
 
-        if deal_type == "Crypto Exchange":
-            await query.edit_message_text(
-                "Select currency",
-                reply_markup=create_currency_kb(("TON", "USDT")),
-            )
-        elif deal_type == "NFT":
-            await query.edit_message_text(
-                "Select currency",
-                reply_markup=create_currency_kb(("INR",)),
-            )
+        if deal_type == "Crypto":
+            currencies = ("TON", "USDT")
         else:
-            await query.edit_message_text(
-                "Select currency",
-                reply_markup=create_currency_kb(("INR",)),
-            )
+            currencies = ("INR",)
+
+        await query.edit_message_text(
+            f"{pe('🪙')} <b>Select deal currency:</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_currency_kb(currencies),
+        )
         return
 
     if data.startswith("create:currency:"):
@@ -1077,9 +1075,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         allowed = {
-            "Crypto Exchange": {"TON", "USDT"},
+            "Crypto": {"TON", "USDT"},
             "NFT": {"INR"},
-            "Other": {"INR"},
+            "Others": {"INR"},
         }.get(state.get("deal_type"), set())
 
         if currency not in allowed:
@@ -1092,7 +1090,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.answer()
         await query.edit_message_text(
-            "Are you buyer or seller?",
+            f"{pe('👤')} <b>Are you buyer or seller?</b>",
+            parse_mode=ParseMode.HTML,
             reply_markup=create_role_kb(),
         )
         return
@@ -1111,10 +1110,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.answer()
         edited = await query.edit_message_text(
-            f"Send deal amount in {esc(state['currency'])} :\n"
+            f"{pe('💰')} <b>Send deal amount in {esc(state['currency'])} :</b>\n"
             "<b>ex - 1, 10, 50</b>",
             parse_mode=ParseMode.HTML,
-            reply_markup=create_back_kb(),
+            reply_markup=create_back_kb("create:back_role"),
         )
         state["prompt_message_id"] = edited.message_id
         set_nt_state(context, update, state)
@@ -1129,28 +1128,59 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_nt_state(context, update, state)
         await query.answer()
         await query.edit_message_text(
-            "Select currency",
+            f"{pe('🪙')} <b>Select deal currency:</b>",
+            parse_mode=ParseMode.HTML,
             reply_markup=create_currency_kb(
-                ("TON", "USDT") if state.get("deal_type") == "Crypto Exchange" else ("INR",)
+                ("TON", "USDT") if state.get("deal_type") == "Crypto" else ("INR",)
             ),
         )
         return
 
-    if data == "create:amount_next":
+    if data == "create:back_amount":
         state = get_nt_state(context, update)
-
-        if not state or state.get("step") != "amount_next":
-            await query.answer("This form is no longer active.", show_alert=True)
+        if not state:
+            await query.answer("Nothing to go back to.", show_alert=True)
             return
+        state["step"] = "amount"
+        set_nt_state(context, update, state)
+        await query.answer()
+        await query.edit_message_text(
+            f"{pe('💰')} <b>Send deal amount in {esc(state['currency'])} :</b>\n"
+            "<b>ex - 1, 10, 50</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_back_kb("create:back_role"),
+        )
+        return
 
+    if data == "create:back_info":
+        state = get_nt_state(context, update)
+        if not state:
+            await query.answer("Nothing to go back to.", show_alert=True)
+            return
+        state["step"] = "info"
+        set_nt_state(context, update, state)
+        await query.answer()
+        await query.edit_message_text(
+            f"{pe('📝')} <b>Send deal info in 4-5 words:</b>\n"
+            "<b>max 30 words</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=create_back_kb("create:back_amount"),
+        )
+        return
+
+    if data == "create:back_terms":
+        state = get_nt_state(context, update)
+        if not state:
+            await query.answer("Nothing to go back to.", show_alert=True)
+            return
         state["step"] = "terms"
         set_nt_state(context, update, state)
         await query.answer()
         await query.edit_message_text(
-            "<b>Send deal terms :</b>\n"
+            f"{pe('📝')} <b>Send deal terms :</b>\n"
             "<b>max 30 words</b>",
             parse_mode=ParseMode.HTML,
-            reply_markup=create_back_kb(),
+            reply_markup=create_back_kb("create:back_info"),
         )
         return
 
@@ -1193,10 +1223,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         DEALS[tid] = {
             "buyer": buyer,
             "seller": seller,
-            "detail": state.get("deal_type", "Other"),
-            "item": state.get("deal_type", "Other"),
+            "detail": state.get("deal_info", state.get("deal_type", "Others")),
+            "item": state.get("deal_info", state.get("deal_type", "Others")),
             "holding": "",
             "terms": state["terms"],
+            "deal_info": state.get("deal_info", ""),
             "amount": amount,
             "release": max(0, amount - fee_amount),
             "fee_percent": fee_percent,
@@ -1220,7 +1251,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         save_deal(tid)
 
-        link = f"https://t.me/NTesorowbot?start=deal_{code}"
+        link = f"https://t.me/{BOT_USERNAME}?start=deal_{code}"
 
         await query.answer("Deal link created.")
         await query.edit_message_text(
@@ -1320,6 +1351,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deal["accepted_by_id"] = uid
         deal["accepted_by_username"] = resolve_username(update)
         save_deal(tid)
+
+        await notify_creator_accepted(context, tid, deal)
+        await notify_deal_admins(context, tid, deal, event="accepted")
 
         await query.answer("Deal accepted.")
         await query.edit_message_text(
@@ -1643,26 +1677,26 @@ def create_deal_type_kb():
         [
             [
                 InlineKeyboardButton(
-                    "Crypto Exchange",
-                    callback_data="create:type:Crypto Exchange",
-                    style="success",
+                    "🪙 Crypto",
+                    callback_data="create:type:Crypto",
+                    style="primary",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "NFT",
+                    "🖼 NFT",
                     callback_data="create:type:NFT",
-                    style="success",
+                    style="primary",
                 ),
                 InlineKeyboardButton(
-                    "Other",
-                    callback_data="create:type:Other",
-                    style="success",
+                    "📦 Others",
+                    callback_data="create:type:Others",
+                    style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "Back",
+                    "🔙 Back",
                     callback_data="menu:back",
                     style="danger",
                 )
@@ -1672,9 +1706,14 @@ def create_deal_type_kb():
 
 
 def create_currency_kb(currencies):
+    labels = {
+        "TON": "⚡ TON",
+        "USDT": "💵 USDT",
+        "INR": "🇮🇳 INR",
+    }
     buttons = [
         InlineKeyboardButton(
-            currency,
+            labels.get(currency, currency),
             callback_data=f"create:currency:{currency}",
             style="success",
         )
@@ -1686,7 +1725,7 @@ def create_currency_kb(currencies):
             buttons,
             [
                 InlineKeyboardButton(
-                    "Back",
+                    "🔙 Back",
                     callback_data="create:back",
                     style="danger",
                 )
@@ -1700,19 +1739,19 @@ def create_role_kb():
         [
             [
                 InlineKeyboardButton(
-                    "Buyer",
+                    "🟢 Buyer",
                     callback_data="create:role:buyer",
                     style="success",
                 ),
                 InlineKeyboardButton(
-                    "Seller",
+                    "🔵 Seller",
                     callback_data="create:role:seller",
-                    style="success",
+                    style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "Back",
+                    "🔙 Back",
                     callback_data="create:back_role",
                     style="danger",
                 )
@@ -1721,37 +1760,16 @@ def create_role_kb():
     )
 
 
-def create_back_kb():
+def create_back_kb(callback_data="create:back_role"):
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    "Back",
-                    callback_data="create:back_role",
+                    "🔙 Back",
+                    callback_data=callback_data,
                     style="danger",
                 )
             ]
-        ]
-    )
-
-
-def create_amount_next_kb():
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "➜ Deal Info",
-                    callback_data="create:amount_next",
-                    style="success",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "Cancel",
-                    callback_data="create:cancel",
-                    style="danger",
-                )
-            ],
         ]
     )
 
@@ -1761,12 +1779,12 @@ def create_confirm_kb():
         [
             [
                 InlineKeyboardButton(
-                    "✓ Confirm",
+                    "✅ Confirm",
                     callback_data="create:confirm",
                     style="success",
                 ),
                 InlineKeyboardButton(
-                    "Cancel",
+                    "❌ Cancel",
                     callback_data="create:cancel",
                     style="danger",
                 ),
@@ -1835,7 +1853,7 @@ def create_deal_preview_text(state):
         f"➥ <b>Deal Type:</b> {esc(state.get('currency', '-'))}\n"
         f"➥ <b>Buyer:</b> {esc(buyer)}\n"
         f"➥ <b>Seller:</b> {esc(seller)}\n"
-        f"➥ <b>Item:</b> {esc(state.get('deal_type', 'Other'))}\n"
+        f"➥ <b>Item:</b> {esc(state.get('deal_info', state.get('deal_type', 'Others')))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(state.get('amount', 0), state.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(state.get('terms', '-'))}\n\n"
         f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>"
@@ -1860,8 +1878,77 @@ def deal_invite_accepted_text(tid, deal):
     return (
         f"<b>Deal - {esc(tid)} Accepted ✓</b>\n\n"
         f"{deal_invite_text(tid, deal)}\n\n"
-        "<b>Both buyer and seller must join the escrow group.</b>"
+        "<b>Both buyer and seller must join the escrow group.</b>\n"
+        "<b>As soon as both are inside, the deal will be posted automatically.</b>"
     )
+
+
+def deal_group_text(tid, deal):
+    return (
+        f"<b>#NFTTraders [Escrow Deal]</b>\n\n"
+        f"➥ <b>Deal Type:</b> {esc(deal.get('currency', '-'))}\n"
+        f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
+        f"➥ <b>Seller:</b> {esc(deal.get('seller', 'pending'))}\n"
+        f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
+        f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
+        f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
+        f"{pe('🔒')} <b>Escrowed by {esc(deal.get('escrowed_by', ESCROW_OWNER))}</b>\n"
+        f"<b>ID:</b> <code>{esc(tid)}</code>"
+    )
+
+
+async def notify_deal_admins(context, tid, deal, event="accepted"):
+    if not BOT_ADMINS:
+        return
+
+    if event == "accepted":
+        title = "🔔 <b>Deal Accepted</b>"
+        extra = "The invited party accepted the deal."
+    else:
+        title = "📌 <b>Deal Ready in Group</b>"
+        extra = "Both parties are in the escrow group and the deal has been posted."
+
+    text = (
+        f"{title}\n\n"
+        f"<b>ID:</b> <code>{esc(tid)}</code>\n"
+        f"<b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
+        f"<b>Seller:</b> {esc(deal.get('seller', 'pending'))}\n"
+        f"<b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
+        f"<b>Item:</b> {esc(deal.get('item', '-'))}\n"
+        f"<b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
+        f"{extra}"
+    )
+
+    for admin_id in list(BOT_ADMINS):
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as exc:
+            print(f"⚠️ Could not notify admin {admin_id}: {exc}")
+
+
+async def notify_creator_accepted(context, tid, deal):
+    creator_id = deal.get("creator_id")
+    if not creator_id:
+        return
+
+    try:
+        await context.bot.send_message(
+            chat_id=creator_id,
+            text=(
+                f"✅ <b>Deal {esc(tid)} Accepted!</b>\n\n"
+                f"<b>{esc(deal.get('accepted_by_username', 'The other party'))}</b> accepted your deal.\n\n"
+                f"Both Buyer and Seller must join the escrow group.\n"
+                f"Once both are inside, the deal will be posted automatically."
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=join_group_kb(tid),
+        )
+    except Exception as exc:
+        print(f"⚠️ Could not notify deal creator: {exc}")
 
 
 async def maybe_post_deal_to_group(context, tid, deal):
@@ -1888,10 +1975,13 @@ async def maybe_post_deal_to_group(context, tid, deal):
         print(f"⚠️ Group membership check failed: {exc}")
         return
 
-    active_statuses = {"member", "administrator", "creator", "restricted"}
+    def is_active_member(member):
+        if member.status in {"member", "administrator", "creator"}:
+            return True
+        return member.status == "restricted" and bool(getattr(member, "is_member", False))
 
-    deal["buyer_joined"] = buyer_member.status in active_statuses
-    deal["seller_joined"] = seller_member.status in active_statuses
+    deal["buyer_joined"] = is_active_member(buyer_member)
+    deal["seller_joined"] = is_active_member(seller_member)
 
     if not (deal["buyer_joined"] and deal["seller_joined"]):
         save_deal(tid)
@@ -1904,7 +1994,7 @@ async def maybe_post_deal_to_group(context, tid, deal):
 
     group_message = await context.bot.send_message(
         chat_id=ESCROW_GROUP_ID,
-        text=deal_invite_text(tid, deal),
+        text=deal_group_text(tid, deal),
         parse_mode=ParseMode.HTML,
         reply_markup=deal_action_kb(tid),
     )
@@ -1918,13 +2008,15 @@ async def maybe_post_deal_to_group(context, tid, deal):
             await context.bot.send_message(
                 chat_id=uid,
                 text=(
-                    f"✅ <b>Both users joined the escrow group.</b>\n"
-                    f"Deal <code>{esc(tid)}</code> is now active in the group."
+                    f"🎉 <b>Both parties joined the escrow group.</b>\n\n"
+                    f"Deal <code>{esc(tid)}</code> is now posted in the group."
                 ),
                 parse_mode=ParseMode.HTML,
             )
         except Exception:
             pass
+
+    await notify_deal_admins(context, tid, deal, event="group_ready")
 
 
 async def group_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2277,11 +2369,7 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         state["amount"] = amount
-        # Keep the wizard on the amount step until the user explicitly
-        # presses the inline "Deal Info" button. This keeps the flow
-        # inside the same inline UI instead of sending a separate
-        # standalone prompt immediately.
-        state["step"] = "amount_next"
+        state["step"] = "info"
         set_nt_state(context, update, state)
 
         try:
@@ -2289,16 +2377,55 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        await context.bot.edit_message_text(
-            chat_id=update.effective_chat.id,
-            message_id=state.get("prompt_message_id"),
-            text=(
-                f"<b>Amount set:</b> {esc(fmt(amount, state.get('currency', 'INR')))}\n\n"
-                "<b>Tap Deal Info to continue.</b>"
-            ),
-            parse_mode=ParseMode.HTML,
-            reply_markup=create_amount_next_kb(),
-        )
+        prompt_id = state.get("prompt_message_id")
+        if prompt_id:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=prompt_id,
+                text=(
+                    f"{pe('📝')} <b>Send deal info in 4-5 words:</b>\n"
+                    "<b>max 30 words</b>"
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=create_back_kb("create:back_amount"),
+            )
+        return
+
+    # New Create Deal info step
+    if state.get("step") == "info" and state.get("deal_type"):
+        words = text.split()
+
+        if not words:
+            return
+
+        if len(words) > 30:
+            await update.message.reply_text(
+                "<b>❌ Deal info max 30 words hone chahiye.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        state["deal_info"] = text
+        state["step"] = "terms"
+        set_nt_state(context, update, state)
+
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+        prompt_id = state.get("prompt_message_id")
+        if prompt_id:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=prompt_id,
+                text=(
+                    f"{pe('📝')} <b>Send deal terms :</b>\n"
+                    "<b>max 30 words</b>"
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=create_back_kb("create:back_info"),
+            )
         return
 
     # New Create Deal terms step
@@ -2324,12 +2451,15 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        preview = create_deal_preview_text(state)
-        await update.message.reply_text(
-            preview,
-            parse_mode=ParseMode.HTML,
-            reply_markup=create_confirm_kb(),
-        )
+        prompt_id = state.get("prompt_message_id")
+        if prompt_id:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=prompt_id,
+                text=create_deal_preview_text(state),
+                parse_mode=ParseMode.HTML,
+                reply_markup=create_confirm_kb(),
+            )
         return
 
     # Existing /form flow
