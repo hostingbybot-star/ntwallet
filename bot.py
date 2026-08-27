@@ -383,7 +383,7 @@ PE = {
     "🔒": "6037249452824072506",
     "😐": "5895514131896733546",
     "©️": "5877301185639091664",
-    "🫱": "5985596818912712352",
+    "🫱": "5776375003280838798",
 }
 
 
@@ -2606,33 +2606,33 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
-    prompt_id = state.get("prompt_message_id")
-if prompt_id:
-    if state.get("deal_type") in ("Crypto", "NFT"):
-        await context.bot.edit_message_text(
-            chat_id=update.effective_chat.id,
-            message_id=prompt_id,
-            text=(
-                "<b>Send deal terms :</b>\n"
-                "<code>max 30 words</code>"
-            ),
-            parse_mode=ParseMode.HTML,
-            reply_markup=create_back_kb("create:back_info"),
-        )
-    else:
-        await context.bot.edit_message_text(
-            chat_id=update.effective_chat.id,
-            message_id=prompt_id,
-            text=(
-                "<b>Send deal info in 4-5 words:</b>\n"
-                "<code>max 30 words</code>"
-            ),
-            parse_mode=ParseMode.HTML,
-            reply_markup=create_back_kb("create:back_amount"),
-        )
+        prompt_id = state.get("prompt_message_id")
 
-return
-    
+        if prompt_id:
+            if state.get("deal_type") in ("Crypto", "NFT"):
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=prompt_id,
+                    text=(
+                        "<b>Send deal terms :</b>\n"
+                        "<code>max 30 words</code>"
+                    ),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=create_back_kb("create:back_info"),
+                )
+            else:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=prompt_id,
+                    text=(
+                        "<b>Send deal info in 4-5 words:</b>\n"
+                        "<code>max 30 words</code>"
+                    ),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=create_back_kb("create:back_amount"),
+                )
+
+        return
 
     # New Create Deal info step
     if state.get("step") == "info" and state.get("deal_type"):
