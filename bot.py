@@ -1393,7 +1393,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         deal["accepted_by_username"] = resolve_username(update)
         save_deal(tid)
 
-        await notify_deal_admins(context, tid, deal, event="accepted")
+        await notify_deal_admins(context, tid, deal)
 
         await query.answer("Deal accepted.")
         await query.edit_message_text(
@@ -2029,7 +2029,7 @@ def create_deal_preview_text(state):
         f"➥ <b>Item:</b> {esc(state.get('deal_info', state.get('deal_type', 'Others')))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(state.get('amount', 0), state.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(state.get('terms', '-'))}\n\n"
-        f"<b>{pe('🔒')} Escrowed by @tr4dergc</b>"
+        f"<b>{pe('🔒')} Escrowed by @tr4degc</b>"
     )
 
 
@@ -2045,7 +2045,7 @@ def deal_invite_text(tid, deal):
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
         # f"<b>{pe('🔒')} Escrowed by {esc(deal.get('escrowed_by', ESCROW_OWNER))}</b>"
-        f"<b>{pe('🔒')} Escrowed by @tr4dergc</b>"
+        f"<b>{pe('🔒')} Escrowed by @tr4degc</b>"
     )
 
 
@@ -2053,7 +2053,7 @@ def deal_invite_accepted_text(tid, deal):
     code = str(deal.get("deep_code", "")).upper()
 
     return (
-        f"<b>Deal - {esc(code)} Accepted ✓</b>\n\n"
+        f"<b>Deal -  <code>{esc(code)}</code> Accepted ✓</b>\n\n"
         f"<b>#NFTTraders [Escrow Form] :</b>\n\n"
         f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
         f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
@@ -2062,7 +2062,7 @@ def deal_invite_accepted_text(tid, deal):
         f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
-        f"<b>{pe('🔒')} Escrowed by @Tr4derGc</b>"
+        f"<b>{pe('🔒')} Escrowed by @Tr4deGc</b>"
     )
 
 
@@ -2232,8 +2232,7 @@ async def maybe_post_deal_to_group(context, tid, deal):
     deal["group_message_id"] = group_message.message_id
     save_deal(tid)
 
-  
-    await notify_deal_admins(context, tid, deal, event="group_ready")
+
 
 
 async def group_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
