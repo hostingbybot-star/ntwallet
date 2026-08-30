@@ -2042,7 +2042,7 @@ def deal_invite_text(tid, deal):
         f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
-        f"<b>{pe('🔒')} Escrowed by @tr4dergc</b>"
+        f"<b>{pe('🔒')} Escrowed by @tr4degc</b>"
     )
 
 
