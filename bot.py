@@ -1467,7 +1467,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                         f"❌ <b>Deal rejected by admin.</b>",
                     ),
                     parse_mode=ParseMode.HTML,
-                    reply_markup=None,
+                    reply_markup=deal_cancel_kb(tid),
                 )
             except Exception as exc:
                 print(f"⚠️ group admin reject edit failed: {exc}")
@@ -1740,6 +1740,33 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             except Exception:
                 pass
 
+        return
+
+
+    if data.startswith("dealcancel:"):
+        tid = data.split(":",1)[1]
+        deal = DEALS.get(tid)
+
+        if not deal or deal.get("status") != "ACTIVE":
+            await query.answer("Deal unavailable.", show_alert=True)
+            return
+
+        username = resolve_username(update).lower()
+        allowed = {str(deal.get("buyer","")).lower(), str(deal.get("seller","")).lower()}
+
+        if username not in allowed:
+            await query.answer("Only Buyer or Seller can cancel.", show_alert=True)
+            return
+
+        deal["status"] = "CANCELLED"
+        save_deal(tid)
+
+        await query.edit_message_text(
+            f"❌ <b>Deal {esc(tid)} cancelled by {esc(resolve_username(update))}.</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=None,
+        )
+        await query.answer("Deal cancelled.")
         return
 
     # -----------------------
@@ -2156,6 +2183,12 @@ def payment_confirm_kb(tid):
             ]
         ]
     )
+
+def deal_cancel_kb(tid):
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Cancel", callback_data=f"dealcancel:{tid}", style="danger")]]
+    )
+
 
 
 def release_auto_text(tid, deal):
