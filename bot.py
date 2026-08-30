@@ -2053,6 +2053,8 @@ def deal_invite_text(tid, deal):
 
 
 def deal_invite_accepted_text(tid, deal):
+    code = str(deal.get("deep_code", "")).upper()
+    
     return (
         f"<b>Deal - <code>{esc(code)}</code> Accepted:</b>\n\n"
         f"#NFTTraders [Escrow Deal]\n\n"
