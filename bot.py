@@ -1001,6 +1001,11 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML,
             reply_markup=deal_invite_kb(tid),
         )
+
+        await update.message.reply_text(
+            "Request received, wait for admin approval 🫱!",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     await update.message.reply_text(
