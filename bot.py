@@ -412,11 +412,13 @@ def calculate_fee(amount, is_exchange=False):
 # Dashboard
 # ===========================
 def main_menu_kb():
+    # FIX: every button now sends the exact callback_data the router
+    # is looking for (previously all sent generic "create" / "menu").
     rows = [
         [
             InlineKeyboardButton(
                 "Create Deal",
-                callback_data="create",
+                callback_data="create:start",
                 style="success",
                 icon_custom_emoji_id=PE["⚡️"],
             )
@@ -424,28 +426,28 @@ def main_menu_kb():
         [
             InlineKeyboardButton(
                 "✦ My status",
-                callback_data="menu",
+                callback_data="menu:my_status",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "★ My Deals Info",
-                callback_data="menu",
+                callback_data="menu:my_deals",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "➤ My Pending Deals",
-                callback_data="menu",
+                callback_data="menu:pending",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "✓ Escrow Global status",
-                callback_data="menu",
+                callback_data="menu:global",
                 style="success",
             )
         ],
@@ -455,25 +457,26 @@ def main_menu_kb():
 
 
 def status_kb():
+    # FIX: correct destinations for each button.
     rows = [
         [
             InlineKeyboardButton(
                 "★ My Deals Info",
-                callback_data="menu",
+                callback_data="menu:my_deals",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "➤ My Pending Deals",
-                callback_data="menu",
+                callback_data="menu:pending",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "🔄 Refresh",
-                callback_data="refresh",
+                callback_data="refresh:my_status",
                 style="success",
             )
         ],
@@ -483,6 +486,7 @@ def status_kb():
 
 
 def back_refresh_kb(refresh_target):
+    # FIX: Back button now goes to "menu:back" (was bare "menu").
     rows = [
         [
             InlineKeyboardButton(
@@ -494,7 +498,7 @@ def back_refresh_kb(refresh_target):
         [
             InlineKeyboardButton(
                 "➤ Back",
-                callback_data="menu",
+                callback_data="menu:back",
             )
         ],
     ]
@@ -797,6 +801,7 @@ def my_deals_kb(update: Update, page=0):
 
 
 def deal_view_kb(page):
+    # FIX: "Main Menu" button now sends "menu:back" (was bare "menu").
     rows = [
         [
             InlineKeyboardButton(
@@ -808,7 +813,7 @@ def deal_view_kb(page):
         [
             InlineKeyboardButton(
                 "➤ Main Menu",
-                callback_data="menu",
+                callback_data="menu:back",
                 style="success",
             )
         ],
@@ -1894,31 +1899,36 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # CREATE DEAL WIZARD
 # ===========================
 def create_deal_type_kb():
+    # FIX: type buttons now carry the actual type value
+    # (create:type:Crypto / create:type:NFT / create:type:Others),
+    # previously all sent bare "create:type" which the router's
+    # data.split(":", 2)[2] could never satisfy. Back now sends
+    # "create:cancel" to return to the main dashboard.
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "Crypto Exchange",
-                    callback_data="create:type",
+                    callback_data="create:type:Crypto",
                     style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     "NFT",
-                    callback_data="create:type",
+                    callback_data="create:type:NFT",
                     style="primary",
                 ),
                 InlineKeyboardButton(
                     "Others",
-                    callback_data="create:type",
+                    callback_data="create:type:Others",
                     style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     "Back",
-                    callback_data="create",
+                    callback_data="create:cancel",
                     style="danger",
                 )
             ],
@@ -1956,24 +1966,28 @@ def create_currency_kb(currencies=("INR", "USDT", "TON")):
 
 
 def create_role_kb():
+    # FIX: Buyer/Seller now send their actual role value
+    # (create:role:buyer / create:role:seller) instead of the
+    # identical bare "create:role" for both buttons. Back now
+    # correctly returns to the currency step.
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "Buyer",
-                    callback_data="create:role",
+                    callback_data="create:role:buyer",
                     style="success",
                 ),
                 InlineKeyboardButton(
                     "Seller",
-                    callback_data="create:role",
+                    callback_data="create:role:seller",
                     style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     "Back",
-                    callback_data="create",
+                    callback_data="create:back_role",
                     style="danger",
                 )
             ],
@@ -1996,18 +2010,20 @@ def create_back_kb(callback_data="create"):
 
 
 def create_confirm_kb():
+    # FIX: Confirm/Cancel now send "create:confirm" / "create:cancel"
+    # (previously both sent bare "create").
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "Confirm",
-                    callback_data="create",
+                    callback_data="create:confirm",
                     style="success",
                     icon_custom_emoji_id=PE["🫱"],
                 ),
                 InlineKeyboardButton(
                     "Cancel",
-                    callback_data="create",
+                    callback_data="create:cancel",
                     style="danger",
                 ),
             ],
@@ -2036,6 +2052,10 @@ def deal_invite_kb(tid):
 
 
 def join_group_kb(tid):
+    # FIX: Cancel button now sends "groupcancel:{tid}" — matches the
+    # router's `data.startswith("groupcancel:")` handler. It previously
+    # sent "group:cancel:{tid}" (extra colon), which never matched
+    # anything, so this button was completely dead.
     rows = []
 
     if ESCROW_GROUP_INVITE_LINK:
@@ -2048,7 +2068,7 @@ def join_group_kb(tid):
                 ),
                 InlineKeyboardButton(
                     "Cancel",
-                    callback_data=f"group:cancel:{tid}",
+                    callback_data=f"groupcancel:{tid}",
                     style="danger",
                 )
             ]
@@ -2419,20 +2439,24 @@ FORM_TITLE = "#NFTTraders Escrow"
 
 
 def currency_kb():
+    # FIX: buttons now carry their actual currency value
+    # (newdeal:currency:TON / USDT / INR) instead of the bare
+    # "newdeal:currency" that could never match
+    # data.rsplit(":", 1)[1].upper() in the router.
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "TON",
-                    callback_data="newdeal:currency",
+                    callback_data="newdeal:currency:TON",
                 ),
                 InlineKeyboardButton(
                     "USDT",
-                    callback_data="newdeal:currency",
+                    callback_data="newdeal:currency:USDT",
                 ),
                 InlineKeyboardButton(
                     "INR",
-                    callback_data="newdeal:currency",
+                    callback_data="newdeal:currency:INR",
                 ),
             ]
         ]
@@ -2440,17 +2464,21 @@ def currency_kb():
 
 
 def deal_action_kb(tid):
+    # FIX: Release/Refund now include the action itself
+    # ("dealaction:{tid}:release" / ":refund") — previously both
+    # buttons sent the identical "dealaction:{tid}", which failed
+    # the router's `_, tid, action = data.split(":", 2)` unpack.
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "Release",
-                    callback_data=f"dealaction:{tid}",
+                    callback_data=f"dealaction:{tid}:release",
                     style="success",
                 ),
                 InlineKeyboardButton(
                     "Refund",
-                    callback_data=f"dealaction:{tid}",
+                    callback_data=f"dealaction:{tid}:refund",
                     style="danger",
                 ),
             ]
