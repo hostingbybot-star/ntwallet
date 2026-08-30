@@ -1288,6 +1288,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             "role": role,
             "status": "PENDING_ACCEPTANCE",
             "escrowed_by": creator_username,
+        "admin_accepted_by": creator_username,
             "created_by_id": update.effective_user.id,
             "chat_id": update.effective_chat.id,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -1503,6 +1504,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         # ------------------------------------------------------------
 
         deal["status"] = "ACTIVE"
+        deal["admin_accepted_by"] = resolve_username(update)
         deal["admin_accepted_by_id"] = uid
         deal["admin_accepted_at"] = datetime.now(timezone.utc).isoformat()
         save_deal(tid)
@@ -1511,8 +1513,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(
                 deal_group_text(tid, deal).replace(
                     f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>",
-                    f"{pe('✅')} <b>Deal accepted by admin.</b>",
-                    f"{esc(resolve_username(update))} !</b>",
+                    f"{pe('✅')} <b>Deal accepted by {esc(resolve_username(update))} !</b>",
                 ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=None,
@@ -1521,22 +1522,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             print(f"⚠️ group admin accept edit failed: {exc}")
 
         await query.answer("Deal accepted.")
-
-        payment_message = await context.bot.send_message(
-            chat_id=deal["chat_id"],
-            text=payment_confirm_text(tid, deal),
-            parse_mode=ParseMode.HTML,
-            reply_markup=payment_confirm_kb(tid),
-        )
-
-        deal["payment_message_id"] = payment_message.message_id
-        save_deal(tid)
-
-        await pin_message(
-            context.bot,
-            deal["chat_id"],
-            payment_message.message_id,
-        )
+        # Payment confirmation is now sent by /add (not immediately after admin acceptance).
 
         for uid2 in {deal.get("buyer_id"), deal.get("seller_id")}:
             if not uid2:
@@ -2154,7 +2140,7 @@ def payment_confirm_text(tid, deal):
         f"{pe('✅')} <b>Payment received !</b>\n"
         "──────────────────\n"
         f"<b>Seller {esc(deal.get('seller', '-'))} Confirm that you have "
-        f"received the payment from {esc(deal.get('escrowed_by', '-'))} !</b>"
+        f"received the payment from {esc(deal.get('admin_accepted_by', '-'))} !</b>"
     )
 
 
@@ -2163,7 +2149,7 @@ def payment_confirm_kb(tid):
         [
             [
                 InlineKeyboardButton(
-                    "✅ Received",
+                    "Received",
                     callback_data=f"dealconfirm:received:{tid}",
                     style="success",
                 )
@@ -2392,13 +2378,11 @@ def deal_action_kb(tid):
                     "Release",
                     callback_data=f"dealaction:{tid}:release",
                     style="success",
-                    icon_custom_emoji_id=PE["📤"],
                 ),
                 InlineKeyboardButton(
                     "Refund",
                     callback_data=f"dealaction:{tid}:refund",
                     style="danger",
-                    icon_custom_emoji_id=PE["🔒"],
                 ),
             ]
         ]
