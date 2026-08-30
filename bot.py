@@ -1003,7 +1003,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await update.message.reply_text(
-            "Request received, wait for admin approval 🫱!",
+            f"Request received, wait for admin approval {pe('🫱')}!",
             parse_mode=ParseMode.HTML,
         )
         return
