@@ -1393,7 +1393,6 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         deal["accepted_by_username"] = resolve_username(update)
         save_deal(tid)
 
-        await notify_deal_admins(context, tid, deal)
 
         await query.answer("Deal accepted.")
         await query.edit_message_text(
@@ -1981,32 +1980,18 @@ def join_group_kb(tid):
         rows.append(
             [
                 InlineKeyboardButton(
-                    "➜ Join Group",
+                    "Join",
                     url=ESCROW_GROUP_INVITE_LINK,
                     style="success",
+                ),
+                InlineKeyboardButton(
+                    "Cancel",
+                    callback_data=f"group:cancel:{tid}",
+                    style="danger",
                 )
             ]
         )
 
-    rows.append(
-        [
-            InlineKeyboardButton(
-                "I Joined — Check",
-                callback_data=f"group:check:{tid}",
-                style="success",
-            )
-        ]
-    )
-
-    rows.append(
-        [
-            InlineKeyboardButton(
-                "✕ Cancel",
-                callback_data=f"group:cancel:{tid}",
-                style="danger",
-            )
-        ]
-    )
 
     return InlineKeyboardMarkup(rows)
 
