@@ -1395,6 +1395,11 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
 
         await query.answer("Deal accepted.")
 
+        try: 
+            await query.edit_message_reply_markup(reply_markup=None) 
+        except Exception as exc:
+            print(f"⚠️ Could not remove invite buttons: {exc}")
+            
         # Send a NEW accepted deal form to the person who accepted
         try:
             await context.bot.send_message(
@@ -2018,7 +2023,7 @@ def create_deal_preview_text(state):
         seller = creator
 
     return (
-        f"<b>#NFTTraders [Escrow Form] :</b>\n\n"
+        f"#NFTTraders [Escrow Form] :\n\n"
         f"➥ <b>Deal Type:</b> {esc(state.get('deal_type', '-'))}\n"
         f"➥ <b>Currency:</b> {esc(state.get('currency', '-'))}\n"
         f"➥ <b>Buyer:</b> {esc(buyer)}\n"
@@ -2035,7 +2040,7 @@ def deal_invite_text(tid, deal):
 
     return (
         f"<b>Deal - <code>{esc(code)}</code></b>\n\n"
-        f"<b>#NFTTraders [Escrow Form] :</b>\n\n"
+        f"#NFTTraders [Escrow Form] :\n\n"
         f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
         f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
         f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
@@ -2049,6 +2054,7 @@ def deal_invite_text(tid, deal):
 
 def deal_invite_accepted_text(tid, deal):
     return (
+        f"<b>Deal - <code>{esc(code)}</code> Accepted:</b>\n\n"
         f"#NFTTraders [Escrow Deal]\n\n"
         f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
         f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
