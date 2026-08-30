@@ -26,7 +26,6 @@ load_dotenv()
 # ===========================
 # Config
 # ===========================
-
 BOT_TOKEN = os.getenv("NTESCROW_BOT_TOKEN")
 BRAND = "@Tr4derz"
 PROVIDER = "@Tr4derz"
@@ -45,7 +44,6 @@ OWNER_IDS = set(
     for x in os.getenv("ADMIN_IDS", "").split(",")
     if x.strip().isdigit()
 )
-
 
 mongo_client = MongoClient(MONGO_URI) if MONGO_URI else None
 mongo_db = mongo_client["escrow_bots"] if mongo_client else None
@@ -70,11 +68,9 @@ if coll is not None:
 
     print(f"✅ [NTescrowbot] {len(DEALS)} deal(s) Mongo se load hui")
 
-
 # ===========================
 # Custom Username Aliases
 # ===========================
-
 ADMIN_ALIASES = {}
 
 if username_aliases_coll is not None:
@@ -92,7 +88,6 @@ if username_aliases_coll is not None:
 # ===========================
 # Bot admins
 # ===========================
-
 BOT_ADMINS = set(OWNER_IDS)
 
 if admins_coll is not None:
@@ -149,7 +144,6 @@ async def add_close_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # Telegram Pin / Unpin Helpers
 # ===========================
-
 async def unpin_message(bot, chat_id, message_id):
     """
     Safely unpin a specific message.
@@ -224,7 +218,6 @@ async def replace_pinned_message(
 # ===========================
 # Sequential Trade ID
 # ===========================
-
 def next_trade_id():
     if meta_coll is not None:
         doc = meta_coll.find_one_and_update(
@@ -251,7 +244,6 @@ def next_trade_id():
 # ===========================
 # Helpers
 # ===========================
-
 def esc(text):
     if text is None:
         return ""
@@ -319,7 +311,6 @@ def resolve_username(update: Update):
 # ===========================
 # Bold unicode helpers
 # ===========================
-
 _UP = ord("𝗔") - ord("A")
 _LOW = ord("𝗮") - ord("a")
 _DIG = ord("𝟬") - ord("0")
@@ -349,7 +340,6 @@ def normalize_bold(text):
 # ===========================
 # Premium Emoji IDs
 # ===========================
-
 PE = {
     "⭐️": "6113744392323867038",
     "❤️": "5994453058656931434",
@@ -398,7 +388,6 @@ def pe(emoji):
 # ===========================
 # Charges
 # ===========================
-
 def calculate_fee(amount, is_exchange=False):
     if is_exchange:
         return amount * 0.025
@@ -422,13 +411,12 @@ def calculate_fee(amount, is_exchange=False):
 # ===========================
 # Dashboard
 # ===========================
-
 def main_menu_kb():
     rows = [
         [
             InlineKeyboardButton(
                 "Create Deal",
-                callback_data="create:start",
+                callback_data="create",
                 style="success",
                 icon_custom_emoji_id=PE["⚡️"],
             )
@@ -436,28 +424,28 @@ def main_menu_kb():
         [
             InlineKeyboardButton(
                 "✦ My status",
-                callback_data="menu:my_status",
+                callback_data="menu",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "★ My Deals Info",
-                callback_data="menu:my_deals",
+                callback_data="menu",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "➤ My Pending Deals",
-                callback_data="menu:pending",
+                callback_data="menu",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "✓ Escrow Global status",
-                callback_data="menu:global",
+                callback_data="menu",
                 style="success",
             )
         ],
@@ -471,21 +459,21 @@ def status_kb():
         [
             InlineKeyboardButton(
                 "★ My Deals Info",
-                callback_data="menu:my_deals",
+                callback_data="menu",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "➤ My Pending Deals",
-                callback_data="menu:pending",
+                callback_data="menu",
                 style="success",
             )
         ],
         [
             InlineKeyboardButton(
                 "🔄 Refresh",
-                callback_data="refresh:my_status",
+                callback_data="refresh",
                 style="success",
             )
         ],
@@ -506,7 +494,7 @@ def back_refresh_kb(refresh_target):
         [
             InlineKeyboardButton(
                 "➤ Back",
-                callback_data="menu:back",
+                callback_data="menu",
             )
         ],
     ]
@@ -563,7 +551,6 @@ def global_status_text():
 # ===========================
 # Leaderboard
 # ===========================
-
 def _is_today(iso_ts):
     if not iso_ts:
         return False
@@ -673,13 +660,13 @@ def my_status_text(update: Update):
 # ===========================
 # My Deals
 # ===========================
-
 PAGE_SIZE = 6
 
 
 def deal_status_display(status):
     return {
         "ACTIVE": "🟡 PENDING",
+        "ADMIN_ACCEPTED": "🛡️ ACCEPTED",
         "HOLD": "⏸️ HOLD",
         "COMPLETED": "✅ DONE",
         "CANCELLED": "❌ CANCELLED",
@@ -821,7 +808,7 @@ def deal_view_kb(page):
         [
             InlineKeyboardButton(
                 "➤ Main Menu",
-                callback_data="menu:back",
+                callback_data="menu",
                 style="success",
             )
         ],
@@ -866,7 +853,6 @@ def pending_deals_text(update: Update):
 # ===========================
 # Broadcast
 # ===========================
-
 def remember_user(update: Update):
     if users_coll is None:
         return
@@ -944,7 +930,6 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /start
 # ===========================
-
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_user(update)
 
@@ -1025,7 +1010,6 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # Callback Router
 # ===========================
-
 async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data or ""
@@ -1288,7 +1272,6 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             "role": role,
             "status": "PENDING_ACCEPTANCE",
             "escrowed_by": creator_username,
-        "admin_accepted_by": creator_username,
             "created_by_id": update.effective_user.id,
             "chat_id": update.effective_chat.id,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -1411,11 +1394,11 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
 
         await query.answer("Deal accepted.")
 
-        try: 
-            await query.edit_message_reply_markup(reply_markup=None) 
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception as exc:
             print(f"⚠️ Could not remove invite buttons: {exc}")
-            
+
         # Send a NEW accepted deal form to the person who accepted
         try:
             msg = await context.bot.send_message(
@@ -1462,12 +1445,11 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
 
             try:
                 await query.edit_message_text(
-                    deal_group_text(tid, deal).replace(
-                        f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>",
-                        f"❌ <b>Deal rejected by admin.</b>",
+                    deal_group_text(tid, deal) + (
+                        f"\n❌ <b>Deal rejected by admin.</b>"
                     ),
                     parse_mode=ParseMode.HTML,
-                    reply_markup=deal_cancel_kb(tid),
+                    reply_markup=None,
                 )
             except Exception as exc:
                 print(f"⚠️ group admin reject edit failed: {exc}")
@@ -1489,40 +1471,37 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         # ------------------------------------------------------------
         # Admin accepted the deal in the group.
         #
-        # New flow (per the requested design):
-        #   1. Group post -> "✅ Deal accepted by admin." (buttons removed)
-        #   2. A fresh "Payment received!" message is sent asking the
-        #      SELLER to confirm they received the payment, with a
-        #      single green "✅ Received" button.
-        #   3. That new message is pinned (old group message is left,
-        #      the "payment" message becomes the tracked pinned msg,
-        #      matching how /add's payment_message_id is unpinned
-        #      later by finalize_deal()).
-        #   4. When the seller taps "Received", the deal auto-completes
-        #      (release), pins the "Escrow deal done!" message and
-        #      sends the two vouch messages.
+        # Flow:
+        #   1. Group post -> edited to "Deal accepted by @admin" and the
+        #      Accept/Reject buttons are replaced with a single Cancel
+        #      button (visible to everyone, usable only by buyer/seller/
+        #      admin).
+        #   2. escrowed_by is updated to the accepting admin's username.
+        #   3. Nothing else happens automatically — /add (used by an
+        #      admin, replying to this message) is what posts the
+        #      "Payment received!" info card and pins it. /close is what
+        #      later posts the seller's "Received" confirmation button.
         # ------------------------------------------------------------
 
-        deal["status"] = "ACTIVE"
-        deal["admin_accepted_by"] = resolve_username(update)
+        admin_username = resolve_username(update)
+
+        deal["status"] = "ADMIN_ACCEPTED"
+        deal["escrowed_by"] = admin_username
         deal["admin_accepted_by_id"] = uid
+        deal["admin_accepted_username"] = admin_username
         deal["admin_accepted_at"] = datetime.now(timezone.utc).isoformat()
         save_deal(tid)
 
         try:
             await query.edit_message_text(
-                deal_group_text(tid, deal).replace(
-                    f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>",
-                    f"{pe('✅')} <b>Deal accepted by {esc(resolve_username(update))} !</b>",
-                ),
+                deal_accepted_group_text(tid, deal),
                 parse_mode=ParseMode.HTML,
-                reply_markup=None,
+                reply_markup=group_cancel_kb(tid),
             )
         except Exception as exc:
             print(f"⚠️ group admin accept edit failed: {exc}")
 
         await query.answer("Deal accepted.")
-        # Payment confirmation is now sent by /add (not immediately after admin acceptance).
 
         for uid2 in {deal.get("buyer_id"), deal.get("seller_id")}:
             if not uid2:
@@ -1531,13 +1510,74 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                 await context.bot.send_message(
                     chat_id=uid2,
                     text=(
-                        f"{pe('✅')} <b>Deal {esc(tid)} has been accepted by admin.</b>\n\n"
-                        "Waiting for the seller to confirm payment receipt in the group."
+                        f"{pe('✅')} <b>Deal {esc(tid)} has been accepted by "
+                        f"{esc(admin_username)}.</b>"
                     ),
                     parse_mode=ParseMode.HTML,
                 )
             except Exception:
                 pass
+        return
+
+    if data.startswith("groupcancel:"):
+        tid = data.rsplit(":", 1)[1]
+        deal = DEALS.get(tid)
+
+        if not deal or deal.get("status") not in {"ADMIN_ACCEPTED", "ACTIVE"}:
+            await query.answer("Deal can no longer be cancelled.", show_alert=True)
+            return
+
+        uid = update.effective_user.id
+        allowed_ids = {deal.get("buyer_id"), deal.get("seller_id")}
+
+        if uid not in allowed_ids and not is_admin(uid):
+            await query.answer(
+                "Only buyer, seller or admin can cancel this deal.",
+                show_alert=True,
+            )
+            return
+
+        canceller = resolve_username(update)
+
+        deal["status"] = "CANCELLED"
+        deal["cancelled_by_id"] = uid
+        deal["cancelled_by_username"] = canceller
+        deal["cancelled_at"] = datetime.now(timezone.utc).isoformat()
+        save_deal(tid)
+
+        await query.answer("Deal cancelled.")
+
+        try:
+            await query.edit_message_text(
+                f"❌ <b>Deal cancelled by {esc(canceller)} !</b>\n"
+                f"<b>ID:</b> <code>{esc(tid)}</code>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=None,
+            )
+        except Exception as exc:
+            print(f"⚠️ groupcancel edit failed: {exc}")
+
+        await unpin_message(
+            context.bot,
+            deal.get("chat_id"),
+            deal.get("payment_message_id") or deal.get("group_message_id"),
+        )
+
+        for uid2 in {deal.get("buyer_id"), deal.get("seller_id"), deal.get("creator_id")}:
+            if not uid2:
+                continue
+            try:
+                await context.bot.send_message(
+                    chat_id=uid2,
+                    text=(
+                        f"❌ <b>Deal {esc(tid)} was cancelled by "
+                        f"{esc(canceller)}.</b>"
+                    ),
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+
         return
 
     if data.startswith("dealconfirm:received:"):
@@ -1742,33 +1782,6 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
 
         return
 
-
-    if data.startswith("dealcancel:"):
-        tid = data.split(":",1)[1]
-        deal = DEALS.get(tid)
-
-        if not deal or deal.get("status") != "ACTIVE":
-            await query.answer("Deal unavailable.", show_alert=True)
-            return
-
-        username = resolve_username(update).lower()
-        allowed = {str(deal.get("buyer","")).lower(), str(deal.get("seller","")).lower()}
-
-        if username not in allowed:
-            await query.answer("Only Buyer or Seller can cancel.", show_alert=True)
-            return
-
-        deal["status"] = "CANCELLED"
-        save_deal(tid)
-
-        await query.edit_message_text(
-            f"❌ <b>Deal {esc(tid)} cancelled by {esc(resolve_username(update))}.</b>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=None,
-        )
-        await query.answer("Deal cancelled.")
-        return
-
     # -----------------------
     # Dashboard navigation
     # -----------------------
@@ -1880,33 +1893,32 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # CREATE DEAL WIZARD
 # ===========================
-
 def create_deal_type_kb():
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "Crypto Exchange",
-                    callback_data="create:type:Crypto",
+                    callback_data="create:type",
                     style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     "NFT",
-                    callback_data="create:type:NFT",
+                    callback_data="create:type",
                     style="primary",
                 ),
                 InlineKeyboardButton(
                     "Others",
-                    callback_data="create:type:Others",
+                    callback_data="create:type",
                     style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     "Back",
-                    callback_data="create:back",
+                    callback_data="create",
                     style="danger",
                 )
             ],
@@ -1949,19 +1961,19 @@ def create_role_kb():
             [
                 InlineKeyboardButton(
                     "Buyer",
-                    callback_data="create:role:buyer",
+                    callback_data="create:role",
                     style="success",
                 ),
                 InlineKeyboardButton(
                     "Seller",
-                    callback_data="create:role:seller",
+                    callback_data="create:role",
                     style="primary",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     "Back",
-                    callback_data="create:back_role",
+                    callback_data="create",
                     style="danger",
                 )
             ],
@@ -1969,7 +1981,7 @@ def create_role_kb():
     )
 
 
-def create_back_kb(callback_data="create:back_role"):
+def create_back_kb(callback_data="create"):
     return InlineKeyboardMarkup(
         [
             [
@@ -1989,13 +2001,13 @@ def create_confirm_kb():
             [
                 InlineKeyboardButton(
                     "Confirm",
-                    callback_data="create:confirm",
+                    callback_data="create",
                     style="success",
                     icon_custom_emoji_id=PE["🫱"],
                 ),
                 InlineKeyboardButton(
                     "Cancel",
-                    callback_data="create:cancel",
+                    callback_data="create",
                     style="danger",
                 ),
             ],
@@ -2042,7 +2054,6 @@ def join_group_kb(tid):
             ]
         )
 
-
     return InlineKeyboardMarkup(rows)
 
 
@@ -2087,7 +2098,7 @@ def deal_invite_text(tid, deal):
 
 def deal_invite_accepted_text(tid, deal):
     code = str(deal.get("deep_code", "")).upper()
-    
+
     return (
         f"<b>Deal - <code>{esc(code)}</code> Accepted:</b>\n\n"
         f"#NFTTraders [Escrow Deal]\n\n"
@@ -2100,6 +2111,7 @@ def deal_invite_accepted_text(tid, deal):
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
         f"{pe('🔒')}<b> Escrowed by @Tr4deGc</b>"
     )
+
 
 async def notify_creator_accepted(context, tid, deal):
     creator_id = deal.get("creator_id")
@@ -2133,8 +2145,41 @@ def deal_group_text(tid, deal):
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
         f"{pe('🔒')} <b>Escrowed by @Tr4deGc</b>\n"
-        # f"<b>ID:</b> <code>{esc(tid)}</code>\n\n"
-        # f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>"
+    )
+
+
+def deal_accepted_group_text(tid, deal):
+    """
+    Shown in the group once an admin has tapped Accept. Keeps the deal
+    details visible and shows who accepted it. The visible trade ID is
+    kept so that /add (used later, in reply to this message) can find
+    the deal.
+    """
+    return (
+        f"#NFTTraders [Escrow Deal]\n\n"
+        f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
+        f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
+        f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
+        f"➥ <b>Seller:</b> {esc(deal.get('seller', 'pending'))}\n"
+        f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
+        f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
+        f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
+        f"{pe('✅')} <b>Deal accepted by {esc(deal.get('admin_accepted_username', '-'))} !</b>\n"
+        f"<b>ID:</b> <code>{esc(tid)}</code>"
+    )
+
+
+def group_cancel_kb(tid):
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Cancel",
+                    callback_data=f"groupcancel:{tid}",
+                    style="danger",
+                )
+            ]
+        ]
     )
 
 
@@ -2159,15 +2204,15 @@ def group_admin_action_kb(tid):
 
 
 # ---------------------------------------------------------------------
-# Payment confirmation ("Received" button) shown after admin accepts
+# Payment confirmation ("Received" button) — posted by /close, once the
+# escrow admin is ready to release funds to the seller.
 # ---------------------------------------------------------------------
-
 def payment_confirm_text(tid, deal):
     return (
         f"{pe('✅')} <b>Payment received !</b>\n"
         "──────────────────\n"
         f"<b>Seller {esc(deal.get('seller', '-'))} Confirm that you have "
-        f"received the payment from {esc(deal.get('admin_accepted_by', '-'))} !</b>"
+        f"received the payment from {esc(deal.get('escrowed_by', '-'))} !</b>"
     )
 
 
@@ -2183,12 +2228,6 @@ def payment_confirm_kb(tid):
             ]
         ]
     )
-
-def deal_cancel_kb(tid):
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Cancel", callback_data=f"dealcancel:{tid}", style="danger")]]
-    )
-
 
 
 def release_auto_text(tid, deal):
@@ -2231,7 +2270,6 @@ async def notify_deal_admins(context, tid, deal, event="accepted"):
             )
         except Exception as exc:
             print(f"⚠️ Could not notify admin {admin_id}: {exc}")
-
 
 
 async def maybe_post_deal_to_group(context, tid, deal):
@@ -2341,7 +2379,6 @@ async def maybe_post_deal_to_group(context, tid, deal):
             )
 
 
-
 async def group_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not ESCROW_GROUP_ID or not update.chat_member:
         return
@@ -2365,7 +2402,6 @@ async def group_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ===========================
 # NT Wallet Form
 # ===========================
-
 SUPPORTED_CURRENCIES = (
     "TON",
     "USDT",
@@ -2388,15 +2424,15 @@ def currency_kb():
             [
                 InlineKeyboardButton(
                     "TON",
-                    callback_data="newdeal:currency:TON",
+                    callback_data="newdeal:currency",
                 ),
                 InlineKeyboardButton(
                     "USDT",
-                    callback_data="newdeal:currency:USDT",
+                    callback_data="newdeal:currency",
                 ),
                 InlineKeyboardButton(
                     "INR",
-                    callback_data="newdeal:currency:INR",
+                    callback_data="newdeal:currency",
                 ),
             ]
         ]
@@ -2409,12 +2445,12 @@ def deal_action_kb(tid):
             [
                 InlineKeyboardButton(
                     "Release",
-                    callback_data=f"dealaction:{tid}:release",
+                    callback_data=f"dealaction:{tid}",
                     style="success",
                 ),
                 InlineKeyboardButton(
                     "Refund",
-                    callback_data=f"dealaction:{tid}:refund",
+                    callback_data=f"dealaction:{tid}",
                     style="danger",
                 ),
             ]
@@ -2425,7 +2461,6 @@ def deal_action_kb(tid):
 # ===========================
 # FORM
 # ===========================
-
 def nt_form_text(currency, amount):
     """
     Static labels bold.
@@ -2541,7 +2576,6 @@ def parse_nt_form(text):
 # ===========================
 # ACTIVE DEAL MESSAGE
 # ===========================
-
 def payment_received_text(tid, deal):
     dt = datetime.fromisoformat(
         deal["created_at"]
@@ -2575,7 +2609,6 @@ def confirm_prompt_text(deal):
 # ===========================
 # COMPLETED MESSAGE
 # ===========================
-
 def completed_text(tid, deal):
     dt = datetime.fromisoformat(
         deal["completed_at"]
@@ -2625,7 +2658,6 @@ def refunded_text(tid, deal):
 # ===========================
 # State
 # ===========================
-
 def nt_state_key(update: Update):
     return (
         f"{update.effective_chat.id}:"
@@ -2668,7 +2700,6 @@ def pop_nt_state(context, update):
 # ===========================
 # Text Handler
 # ===========================
-
 async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -2838,7 +2869,6 @@ async def nt_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /stats
 # ===========================
-
 async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_user(update)
 
@@ -2853,7 +2883,6 @@ async def mystatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # /setusername
 # Owner Only
 # ===========================
-
 async def setusername_cmd(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -2968,7 +2997,6 @@ async def setusername_cmd(
 # ===========================
 # /form
 # ===========================
-
 async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
@@ -2996,21 +3024,19 @@ async def form_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /add
 # ===========================
-
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /add
-        -> form amount use karega
+    Two flows share this command:
 
-    /add 500
-        -> custom amount use karega
+    1) NEW group flow — reply to the "Deal accepted by @admin" message
+       posted after the group admin taps Accept. The trade ID is read
+       straight out of that message (it already carries the full deal
+       record in DEALS), so nothing needs to be re-typed. This just
+       posts the "Payment received!" info card and pins it, marking
+       the deal ACTIVE and ready for /close.
 
-    IMPORTANT:
-        /add ke baad:
-        1. Filled form unpin
-        2. Payment Received message send
-        3. Payment Received message PIN
-        4. Confirmation message send
+    2) EXISTING manual flow (unchanged) — reply to a hand-filled
+       /form template. Behaves exactly as before.
     """
 
     allowed, reason = await add_close_allowed(
@@ -3040,6 +3066,71 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # -----------------------------------------------------------
+    # NEW group flow: reply carries a DL-TR4DE-N id from the wizard
+    # -----------------------------------------------------------
+    id_match = re.search(r"\b(DL-TR4DE-\d+)\b", raw_text, re.I)
+
+    if id_match:
+        tid_candidate = id_match.group(1).upper()
+        deal_candidate = DEALS.get(tid_candidate)
+
+        if deal_candidate and "deal_type" in deal_candidate:
+            if deal_candidate.get("status") != "ADMIN_ACCEPTED":
+                await update.message.reply_text(
+                    f"<b>❌ Deal {esc(tid_candidate)} is not waiting for "
+                    f"/add right now (status: "
+                    f"{esc(deal_candidate.get('status', '-'))}).</b>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+
+            tid = tid_candidate
+            deal = deal_candidate
+
+            if context.args:
+                custom_amount = extract_amount(context.args[0])
+
+                if custom_amount > 0:
+                    deal["amount"] = custom_amount
+                    fee_amount = (
+                        custom_amount
+                        * deal.get("fee_percent", DEFAULT_FEE_PERCENT)
+                        / 100
+                    )
+                    deal["release"] = max(0, custom_amount - fee_amount)
+
+            payment_message = await update.message.reply_text(
+                payment_received_text(tid, deal),
+                parse_mode=ParseMode.HTML,
+            )
+
+            await unpin_message(
+                context.bot,
+                deal.get("chat_id"),
+                deal.get("group_message_id"),
+            )
+
+            deal["payment_message_id"] = payment_message.message_id
+            deal["status"] = "ACTIVE"
+            save_deal(tid)
+
+            await pin_message(
+                context.bot,
+                deal.get("chat_id"),
+                payment_message.message_id,
+            )
+
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+
+            return
+
+    # -----------------------------------------------------------
+    # EXISTING manual /form -> /add flow (unchanged)
+    # -----------------------------------------------------------
     parsed, error = parse_nt_form(
         raw_text
     )
@@ -3188,7 +3279,6 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /cancel
 # ===========================
-
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
@@ -3214,7 +3304,6 @@ async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /hold
 # ===========================
-
 def _hold_admin_emoji():
     return pe('🛡️')
 
@@ -3368,7 +3457,6 @@ async def hold_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # Finalization
 # ===========================
-
 async def finalize_deal(
     context,
     tid,
@@ -3545,19 +3633,22 @@ async def finalize_deal(
 # ===========================
 # /close
 # ===========================
-
 async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /close ke baad:
 
-    ACTIVE payment message:
-        UNPIN
+    NEW group-flow deals (created via the wizard, "deal_type" present):
+        mode == "release":
+            ACTIVE payment/info card -> UNPIN
+            "Received" confirmation prompt -> SEND + PIN
+            (Deal only finalizes once the seller taps Received.)
+        mode == "refund":
+            Admin-authorized instant refund via finalize_deal().
 
-    Completed / Refunded message:
-        PIN
+    EXISTING manual /form -> /add deals: unchanged — still requires
+    both Buyer and Seller votes before finalizing.
 
-    /close command:
-        DELETE
+    /close command: DELETE
     """
 
     allowed, reason = await add_close_allowed(
@@ -3649,22 +3740,37 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     closer_id = update.effective_user.id
 
+    is_new_flow = "deal_type" in deal
+
     # -----------------------
     # Permission
     # -----------------------
 
-    if (
-        not is_owner(closer_id)
-        and closer_id != deal.get(
-            "created_by_id"
-        )
-    ):
-        await update.message.reply_text(
-            "<b>❌ Tum sirf apni create hui "
-            "deal close kar sakte ho.</b>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
+    if is_new_flow:
+        if not (
+            is_owner(closer_id)
+            or is_admin(closer_id)
+            or closer_id == deal.get("admin_accepted_by_id")
+        ):
+            await update.message.reply_text(
+                "<b>❌ Sirf escrow admin hi is deal ko close "
+                "kar sakta hai.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+    else:
+        if (
+            not is_owner(closer_id)
+            and closer_id != deal.get(
+                "created_by_id"
+            )
+        ):
+            await update.message.reply_text(
+                "<b>❌ Tum sirf apni create hui "
+                "deal close kar sakte ho.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
 
     if deal.get("status") == "HOLD":
         await update.message.reply_text(
@@ -3682,7 +3788,74 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -----------------------
-    # Votes
+    # NEW group-flow deals
+    # -----------------------
+
+    if is_new_flow:
+        if mode == "refund":
+            deal["closed_by"] = resolve_username(update)
+
+            success = await finalize_deal(
+                context,
+                tid,
+                deal,
+                mode,
+                closer_id=closer_id,
+                custom_amount=custom_amount,
+            )
+
+            if not success:
+                return
+
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+
+            return
+
+        # mode == "release": post the seller confirmation prompt.
+        if deal.get("close_requested"):
+            await update.message.reply_text(
+                "<b>⏳ Seller confirmation already waiting.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        deal["close_requested"] = True
+        save_deal(tid)
+
+        payment_message = await context.bot.send_message(
+            chat_id=deal["chat_id"],
+            text=payment_confirm_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+            reply_markup=payment_confirm_kb(tid),
+        )
+
+        await unpin_message(
+            context.bot,
+            deal["chat_id"],
+            deal.get("payment_message_id"),
+        )
+
+        deal["payment_message_id"] = payment_message.message_id
+        save_deal(tid)
+
+        await pin_message(
+            context.bot,
+            deal["chat_id"],
+            payment_message.message_id,
+        )
+
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+        return
+
+    # -----------------------
+    # EXISTING manual-form flow (unchanged)
     # -----------------------
 
     votes = deal.get(
@@ -3752,7 +3925,6 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /alldeals
 # ===========================
-
 async def alldeals_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not admin_only_allowed(update):
         return
@@ -3787,7 +3959,6 @@ async def alldeals_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /leaderboard
 # ===========================
-
 async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not admin_only_allowed(update):
         return
@@ -3839,7 +4010,6 @@ async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /deal
 # ===========================
-
 async def deal_lookup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not admin_only_allowed(update):
         return
@@ -3872,7 +4042,6 @@ async def deal_lookup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # Admin management
 # ===========================
-
 async def addadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if (
         update.effective_chat.type != "private"
@@ -4141,7 +4310,6 @@ async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # /help
 # ===========================
-
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
@@ -4189,7 +4357,6 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 # Keep Alive
 # ===========================
-
 def start_dummy_server():
     port = int(
         os.getenv(
@@ -4232,7 +4399,6 @@ def start_dummy_server():
 # ===========================
 # Main
 # ===========================
-
 def main():
     if not BOT_TOKEN:
         raise RuntimeError(
