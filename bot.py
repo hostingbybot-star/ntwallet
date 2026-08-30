@@ -2168,22 +2168,20 @@ def deal_group_text(tid, deal):
     )
 
 
-def deal_accepted_group_text(tid, deal):
+def deal_admin_accepted_notice_text(tid, deal):
     """
-    Shown in the group once an admin has tapped Accept. Keeps the deal
-    details visible and shows who accepted it. The visible trade ID is
-    kept so that /add (used later, in reply to this message) can find
-    the deal.
+    Sent as its OWN separate message right after the group deal card
+    is edited (Accept/Reject buttons -> Cancel button). Previously
+    this text was merged into the same message as the deal details;
+    now it's a standalone message underneath the card.
+
+    IMPORTANT: the trade ID is kept here (not just tracked in DEALS)
+    because /add, used later in reply to THIS notice message, finds
+    the deal by regex-matching DL-TR4DE-N out of the replied-to
+    message text. Admin/creator must reply to this notice (not the
+    edited deal card) when running /add.
     """
     return (
-        f"#NFTTraders [Escrow Deal]\n\n"
-        f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
-        f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
-        f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
-        f"➥ <b>Seller:</b> {esc(deal.get('seller', 'pending'))}\n"
-        f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
-        f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
-        f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
         f"{pe('✅')} <b>Deal accepted by {esc(deal.get('admin_accepted_username', '-'))} !</b>\n"
         f"<b>ID:</b> <code>{esc(tid)}</code>"
     )
