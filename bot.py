@@ -972,11 +972,23 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if deal.get("status") != "PENDING_ACCEPTANCE":
             if deal.get("status") == "WAITING_GROUP":
-                await update.message.reply_text(
+                msg = await update.message.reply_text(
                     deal_invite_accepted_text(tid, deal),
                     parse_mode=ParseMode.HTML,
                     reply_markup=join_group_kb(tid),
                 )
+
+                uid = update.effective_user.id
+
+                if uid == deal.get("creator_id"):
+                    deal["creator_accepted_message_id"] = msg.message_id
+                elif uid == deal.get("accepted_by_id"):
+                    deal["accepted_message_id"] = msg.message_id
+
+                save_deal(tid)
+
+                # If both users are already in the group, post immediately.
+                await maybe_post_deal_to_group(context, tid, deal)
             elif deal.get("status") == "ACTIVE":
                 await update.message.reply_text(
                     "<b>✅ This deal is already active in the escrow group.</b>",
@@ -1000,11 +1012,6 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deal_invite_text(tid, deal),
             parse_mode=ParseMode.HTML,
             reply_markup=deal_invite_kb(tid),
-        )
-
-        await update.message.reply_text(
-            f"Request received, wait for admin approval {pe('🫱')}!",
-            parse_mode=ParseMode.HTML,
         )
         return
 
@@ -1292,6 +1299,9 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             "buyer_joined": False,
             "seller_joined": False,
             "group_posted": False,
+            "group_posting": False,
+            "creator_accepted_message_id": None,
+            "accepted_message_id": None,
             "votes": {"release": [], "refund": []},
         }
         save_deal(tid)
@@ -1407,12 +1417,16 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
             
         # Send a NEW accepted deal form to the person who accepted
         try:
-            await context.bot.send_message(
+            msg = await context.bot.send_message(
                 chat_id=uid,
                 text=deal_invite_accepted_text(tid, deal),
                 parse_mode=ParseMode.HTML,
                 reply_markup=join_group_kb(tid),
             )
+
+            deal["accepted_message_id"] = msg.message_id
+            save_deal(tid)
+
         except Exception as exc:
             print(f"⚠️ Could not send accepted form to accepter: {exc}")
 
@@ -2080,14 +2094,19 @@ async def notify_creator_accepted(context, tid, deal):
         return
 
     try:
-        await context.bot.send_message(
+        msg = await context.bot.send_message(
             chat_id=creator_id,
             text=deal_invite_accepted_text(tid, deal),
             parse_mode=ParseMode.HTML,
             reply_markup=join_group_kb(tid),
         )
+
+        deal["creator_accepted_message_id"] = msg.message_id
+        save_deal(tid)
+
     except Exception as exc:
         print(f"⚠️ Could not send accepted form to creator: {exc}")
+
 
 def deal_group_text(tid, deal):
     return (
@@ -2200,12 +2219,12 @@ async def maybe_post_deal_to_group(context, tid, deal):
         return
 
     if not ESCROW_GROUP_ID:
+        print("⚠️ ESCROW_GROUP_ID is not configured.")
         return
 
     if not deal.get("buyer_id") or not deal.get("seller_id"):
         return
 
-    # Check both users' membership whenever this helper runs.
     try:
         buyer_member = await context.bot.get_chat_member(
             ESCROW_GROUP_ID,
@@ -2222,7 +2241,10 @@ async def maybe_post_deal_to_group(context, tid, deal):
     def is_active_member(member):
         if member.status in {"member", "administrator", "creator"}:
             return True
-        return member.status == "restricted" and bool(getattr(member, "is_member", False))
+        return (
+            member.status == "restricted"
+            and bool(getattr(member, "is_member", False))
+        )
 
     deal["buyer_joined"] = is_active_member(buyer_member)
     deal["seller_joined"] = is_active_member(seller_member)
@@ -2231,7 +2253,6 @@ async def maybe_post_deal_to_group(context, tid, deal):
         save_deal(tid)
         return
 
-    # Mark as posting so two simultaneous membership callbacks cannot create duplicate posts.
     deal["group_posting"] = True
     deal["chat_id"] = ESCROW_GROUP_ID
     save_deal(tid)
@@ -2255,6 +2276,49 @@ async def maybe_post_deal_to_group(context, tid, deal):
     deal["group_message_id"] = group_message.message_id
     save_deal(tid)
 
+    # Remove Join / Cancel buttons from both accepted-form messages.
+    dm_messages = [
+        (deal.get("creator_id"), deal.get("creator_accepted_message_id")),
+        (deal.get("accepted_by_id"), deal.get("accepted_message_id")),
+    ]
+
+    for user_id, message_id in dm_messages:
+        if not user_id or not message_id:
+            continue
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=int(user_id),
+                message_id=int(message_id),
+                reply_markup=None,
+            )
+        except Exception as exc:
+            print(
+                f"⚠️ Could not remove Join/Cancel buttons "
+                f"for user {user_id}: {exc}"
+            )
+
+    # Send this separate message only after BOTH users are in the group.
+    request_text = (
+        f"Request received, wait for admin approval {pe('🫱')}!"
+    )
+
+    for user_id in {
+        deal.get("creator_id"),
+        deal.get("accepted_by_id"),
+    }:
+        if not user_id:
+            continue
+        try:
+            await context.bot.send_message(
+                chat_id=int(user_id),
+                text=request_text,
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as exc:
+            print(
+                f"⚠️ Could not send request message "
+                f"to {user_id}: {exc}"
+            )
 
 
 
