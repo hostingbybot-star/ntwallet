@@ -1393,14 +1393,25 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         deal["accepted_by_username"] = resolve_username(update)
         save_deal(tid)
 
-
         await query.answer("Deal accepted.")
-        await query.edit_message_text(
-            deal_invite_accepted_text(tid, deal),
-            parse_mode=ParseMode.HTML,
-            reply_markup=join_group_kb(tid),
-        )
+
+        # Send a NEW accepted deal form to the person who accepted
+        try:
+            await context.bot.send_message(
+                chat_id=uid,
+                text=deal_invite_accepted_text(tid, deal),
+                parse_mode=ParseMode.HTML,
+                reply_markup=join_group_kb(tid),
+            )
+        except Exception as exc:
+            print(f"⚠️ Could not send accepted form to accepter: {exc}")
+
+        # Send a NEW accepted deal form to the creator
+        await notify_creator_accepted(context, tid, deal)
+
+        # Check whether both users are already in the escrow group
         await maybe_post_deal_to_group(context, tid, deal)
+
         return
 
     if data.startswith("groupadmin:accept:") or data.startswith("groupadmin:reject:"):
@@ -2019,8 +2030,10 @@ def create_deal_preview_text(state):
 
 
 def deal_invite_text(tid, deal):
+    code = str(deal.get("deep_code", "")).upper()
+
     return (
-        f"<b>Deal - {esc(tid)}</b>\n\n"
+        f"<b>Deal - <code>{esc(code)}</code></b>\n\n"
         f"<b>#NFTTraders [Escrow Form] :</b>\n\n"
         f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
         f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
@@ -2029,17 +2042,13 @@ def deal_invite_text(tid, deal):
         f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
-        # f"<b>{pe('🔒')} Escrowed by {esc(deal.get('escrowed_by', ESCROW_OWNER))}</b>"
-        f"<b>{pe('🔒')} Escrowed by @tr4degc</b>"
+        f"<b>{pe('🔒')} Escrowed by @tr4dergc</b>"
     )
 
 
 def deal_invite_accepted_text(tid, deal):
-    code = str(deal.get("deep_code", "")).upper()
-
     return (
-        f"<b>Deal -  <code>{esc(code)}</code> Accepted ✓</b>\n\n"
-        f"<b>#NFTTraders [Escrow Form] :</b>\n\n"
+        f"<b>#NFTTraders [Escrow Deal]</b>\n\n"
         f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
         f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
         f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
@@ -2047,13 +2056,28 @@ def deal_invite_accepted_text(tid, deal):
         f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
-        f"<b>{pe('🔒')} Escrowed by @Tr4deGc</b>"
+        f"{pe('🔒')}<b> Escrowed by @Tr4deGc</b>"
     )
 
+async def notify_creator_accepted(context, tid, deal):
+    creator_id = deal.get("creator_id")
+
+    if not creator_id:
+        return
+
+    try:
+        await context.bot.send_message(
+            chat_id=creator_id,
+            text=deal_invite_accepted_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+            reply_markup=join_group_kb(tid),
+        )
+    except Exception as exc:
+        print(f"⚠️ Could not send accepted form to creator: {exc}")
 
 def deal_group_text(tid, deal):
     return (
-        f"<b>#NFTTraders [Escrow Deal]</b>\n\n"
+        f"#NFTTraders [Escrow Deal]\n\n"
         f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
         f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
         f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
