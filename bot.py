@@ -2119,7 +2119,7 @@ def deal_group_text(tid, deal):
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
         f"{pe('🔒')} <b>Escrowed by @Tr4deGc</b>\n"
-        f"<b>ID:</b> <code>{esc(tid)}</code>\n\n"
+        # f"<b>ID:</b> <code>{esc(tid)}</code>\n\n"
         f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>"
     )
 
