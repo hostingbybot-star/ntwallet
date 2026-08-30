@@ -1970,9 +1970,10 @@ def deal_invite_kb(tid):
         [
             [
                 InlineKeyboardButton(
-                    "✓ Accept",
+                    "Accept",
                     callback_data=f"invite:accept:{tid}",
                     style="success",
+                    icon_custom_emoji_id=PE["🫱"],
                 ),
                 InlineKeyboardButton(
                     "Reject",
@@ -2048,7 +2049,7 @@ def deal_invite_text(tid, deal):
 
 def deal_invite_accepted_text(tid, deal):
     return (
-        f"<b>#NFTTraders [Escrow Deal]</b>\n\n"
+        f"#NFTTraders [Escrow Deal]\n\n"
         f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
         f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
         f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
