@@ -1393,7 +1393,6 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         deal["accepted_by_username"] = resolve_username(update)
         save_deal(tid)
 
-        await notify_creator_accepted(context, tid, deal)
         await notify_deal_admins(context, tid, deal, event="accepted")
 
         await query.answer("Deal accepted.")
@@ -2030,7 +2029,7 @@ def create_deal_preview_text(state):
         f"➥ <b>Item:</b> {esc(state.get('deal_info', state.get('deal_type', 'Others')))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(state.get('amount', 0), state.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(state.get('terms', '-'))}\n\n"
-        f"<b>{pe('🔒')} Escrowed by {esc(ESCROW_OWNER)}</b>"
+        f"<b>{pe('🔒')} Escrowed by @tr4dergc</b>"
     )
 
 
@@ -2045,16 +2044,25 @@ def deal_invite_text(tid, deal):
         f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
-        f"<b>{pe('🔒')} Escrowed by {esc(deal.get('escrowed_by', ESCROW_OWNER))}</b>"
+        # f"<b>{pe('🔒')} Escrowed by {esc(deal.get('escrowed_by', ESCROW_OWNER))}</b>"
+        f"<b>{pe('🔒')} Escrowed by @tr4dergc</b>"
     )
 
 
 def deal_invite_accepted_text(tid, deal):
+    code = str(deal.get("deep_code", "")).upper()
+
     return (
-        f"<b>Deal - {esc(tid)} Accepted ✓</b>\n\n"
-        f"{deal_invite_text(tid, deal)}\n\n"
-        "<b>Both buyer and seller must join the escrow group.</b>\n"
-        "<b>As soon as both are inside, the deal will be posted automatically.</b>"
+        f"<b>Deal - {esc(code)} Accepted ✓</b>\n\n"
+        f"<b>#NFTTraders [Escrow Form] :</b>\n\n"
+        f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
+        f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
+        f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
+        f"➥ <b>Seller:</b> {esc(deal.get('seller', 'pending'))}\n"
+        f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
+        f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
+        f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
+        f"<b>{pe('🔒')} Escrowed by @Tr4derGc</b>"
     )
 
 
@@ -2163,26 +2171,6 @@ async def notify_deal_admins(context, tid, deal, event="accepted"):
             print(f"⚠️ Could not notify admin {admin_id}: {exc}")
 
 
-async def notify_creator_accepted(context, tid, deal):
-    creator_id = deal.get("creator_id")
-    if not creator_id:
-        return
-
-    try:
-        await context.bot.send_message(
-            chat_id=creator_id,
-            text=(
-                f"✅ <b>Deal {esc(tid)} Accepted!</b>\n\n"
-                f"<b>{esc(deal.get('accepted_by_username', 'The other party'))}</b> accepted your deal.\n\n"
-                f"Both Buyer and Seller must join the escrow group.\n"
-                f"Once both are inside, the deal will be posted automatically."
-            ),
-            parse_mode=ParseMode.HTML,
-            reply_markup=join_group_kb(tid),
-        )
-    except Exception as exc:
-        print(f"⚠️ Could not notify deal creator: {exc}")
-
 
 async def maybe_post_deal_to_group(context, tid, deal):
     if deal.get("group_posted") or deal.get("group_posting"):
@@ -2244,21 +2232,7 @@ async def maybe_post_deal_to_group(context, tid, deal):
     deal["group_message_id"] = group_message.message_id
     save_deal(tid)
 
-    for uid in {deal.get("buyer_id"), deal.get("seller_id")}:
-        if not uid:
-            continue
-        try:
-            await context.bot.send_message(
-                chat_id=uid,
-                text=(
-                    f"🎉 <b>Both parties joined the escrow group.</b>\n\n"
-                    f"Deal <code>{esc(tid)}</code> is now posted in the group."
-                ),
-                parse_mode=ParseMode.HTML,
-            )
-        except Exception:
-            pass
-
+  
     await notify_deal_admins(context, tid, deal, event="group_ready")
 
 
