@@ -1512,6 +1512,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                 deal_group_text(tid, deal).replace(
                     f"{pe('🛡️')} <b>Waiting for admin confirmation.</b>",
                     f"{pe('✅')} <b>Deal accepted by admin.</b>",
+                    f"{esc(resolve_username(update))} !</b>",
                 ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=None,
