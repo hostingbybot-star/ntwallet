@@ -138,7 +138,22 @@ async def is_group_admin(bot, user_id):
 
 
 async def add_close_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return is_admin(update.effective_user.id), None
+    """Allow /add and /close for configured admins in private or escrow group."""
+    if not update.effective_user:
+        return False, None
+
+    uid = update.effective_user.id
+    if is_admin(uid):
+        return True, None
+
+    if (
+        update.effective_chat
+        and update.effective_chat.id == ESCROW_GROUP_ID
+        and await is_group_admin(context.bot, uid)
+    ):
+        return True, None
+
+    return False, None
 
 
 # ===========================
@@ -1512,7 +1527,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                 chat_id=deal["chat_id"],
                 text=deal_admin_accepted_notice_text(tid, deal),
                 parse_mode=ParseMode.HTML,
-                reply_markup=group_cancel_kb(tid),
+                reply_markup=None,
             )
             deal["accepted_notice_message_id"] = notice_message.message_id
             save_deal(tid)
@@ -3088,10 +3103,10 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -----------------------------------------------------------
-    # NEW group flow: reply carries a DL-TR4DE-N id from the wizard
+    # NEW group flow: reply to the GROUP "Deal accepted by @admin"
+    # notice. /add starts the active phase and posts Release/Refund.
     # -----------------------------------------------------------
     id_match = re.search(r"\b(DL-TR4DE-\d+)\b", raw_text, re.I)
-
     if id_match:
         tid_candidate = id_match.group(1).upper()
         deal_candidate = DEALS.get(tid_candidate)
@@ -3111,7 +3126,6 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if context.args:
                 custom_amount = extract_amount(context.args[0])
-
                 if custom_amount > 0:
                     deal["amount"] = custom_amount
                     fee_amount = (
@@ -3121,42 +3135,24 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     deal["release"] = max(0, custom_amount - fee_amount)
 
-            # "Payment received!" card — informational only, not pinned.
-            payment_message = await update.message.reply_text(
-                payment_received_text(tid, deal),
-                parse_mode=ParseMode.HTML,
-            )
-
-            deal["payment_message_id"] = payment_message.message_id
-            deal["status"] = "ACTIVE"
-            save_deal(tid)
-
-            # Remove the Cancel button from the "Deal accepted by..."
-            # notice — the deal has now moved past the cancel window.
-            notice_id = deal.get("accepted_notice_message_id")
-            if notice_id:
-                try:
-                    await context.bot.edit_message_reply_markup(
-                        chat_id=deal.get("chat_id"),
-                        message_id=notice_id,
-                        reply_markup=None,
-                    )
-                except Exception as exc:
-                    print(
-                        f"⚠️ Could not remove cancel button "
-                        f"from notice: {exc}"
-                    )
-
-            # Release / Refund voting prompt — new message, not pinned.
-            confirm_message = await context.bot.send_message(
-                chat_id=deal.get("chat_id"),
-                text=confirm_prompt_text(deal),
+            payment_message = await context.bot.send_message(
+                chat_id=deal["chat_id"],
+                text=payment_received_text(tid, deal),
                 parse_mode=ParseMode.HTML,
                 reply_markup=deal_action_kb(tid),
             )
 
-            deal["confirm_message_id"] = confirm_message.message_id
+            deal["payment_message_id"] = payment_message.message_id
+            deal["status"] = "ACTIVE"
+            deal["close_requested"] = False
+            deal["votes"] = {"release": [], "refund": []}
             save_deal(tid)
+
+            await pin_message(
+                context.bot,
+                deal["chat_id"],
+                payment_message.message_id,
+            )
 
             try:
                 await update.message.delete()
@@ -3823,25 +3819,83 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -----------------------
-    # Admin-authorized instant refund for group-wizard deals only.
-    # (Release always goes through the common vote-based path below,
-    # same as the manual /form flow.)
+    # NEW group flow
+    # /add -> Release/Refund buttons.
+    # /close release -> Seller "Received" confirmation.
+    # /close refund -> finalize after both parties chose Refund.
     # -----------------------
+    if is_new_flow:
+        votes = deal.get("votes", {})
+        release_votes = {str(x).lower() for x in votes.get("release", [])}
+        refund_votes = {str(x).lower() for x in votes.get("refund", [])}
 
-    if is_new_flow and mode == "refund":
+        parties = {
+            str(deal.get("buyer", "")).lower(),
+            str(deal.get("seller", "")).lower(),
+        }
+
+        if mode == "refund":
+            if not parties.issubset(refund_votes):
+                await update.message.reply_text(
+                    "<b>❌ Buyer aur Seller dono ne Refund confirm nahi kiya.</b>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+
+            deal["closed_by"] = resolve_username(update)
+            success = await finalize_deal(
+                context, tid, deal, "refund",
+                closer_id=closer_id,
+                custom_amount=custom_amount,
+            )
+            if not success:
+                return
+
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+            return
+
+        if not parties.issubset(release_votes):
+            await update.message.reply_text(
+                "<b>❌ Buyer aur Seller dono ne Release confirm nahi kiya.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        if deal.get("close_requested"):
+            await update.message.reply_text(
+                "<b>⏳ Received confirmation already waiting.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        deal["close_requested"] = True
         deal["closed_by"] = resolve_username(update)
+        save_deal(tid)
 
-        success = await finalize_deal(
-            context,
-            tid,
-            deal,
-            mode,
-            closer_id=closer_id,
-            custom_amount=custom_amount,
+        await unpin_message(
+            context.bot,
+            deal["chat_id"],
+            deal.get("payment_message_id"),
         )
 
-        if not success:
-            return
+        received_message = await context.bot.send_message(
+            chat_id=deal["chat_id"],
+            text=payment_confirm_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+            reply_markup=payment_confirm_kb(tid),
+        )
+
+        deal["received_message_id"] = received_message.message_id
+        save_deal(tid)
+
+        await pin_message(
+            context.bot,
+            deal["chat_id"],
+            received_message.message_id,
+        )
 
         try:
             await update.message.delete()
@@ -3851,8 +3905,7 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -----------------------
-    # Common vote-based flow (manual /form deals, and group-wizard
-    # deals for mode == "release")
+    # Existing manual /form -> /add flow
     # -----------------------
 
     votes = deal.get(
@@ -4325,7 +4378,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += [
             "",
             "<b>🛡 Admin Commands</b>",
-            "<b>/add — Filled form par reply karke deal create karo</b>",
+            "<b>/add — Group ke &quot;Deal accepted&quot; message par reply karke active deal start karo</b>",
             "<b>/add 500 — Custom amount ke saath deal create karo</b>",
             "<b>/close — Deal complete/refund karo</b>",
             "<b>/alldeals — Saari deals ki list</b>",
