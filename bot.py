@@ -3068,133 +3068,106 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Two flows share this command:
 
-    1) NEW group flow — reply to the "Deal accepted by @admin" message
-       posted after the group admin taps Accept. The trade ID is read
-       straight out of that message (it already carries the full deal
-       record in DEALS), so nothing needs to be re-typed. This just
-       posts the "Payment received!" info card and pins it, marking
-       the deal ACTIVE and ready for /close.
+    1) NEW group flow — reply to the admin-accepted group deal message.
+       Deal is identified using the saved group_message_id.
 
-    2) EXISTING manual flow (unchanged) — reply to a hand-filled
-       /form template. Behaves exactly as before.
+    2) EXISTING manual /form flow — unchanged.
     """
 
-    allowed, reason = await add_close_allowed(
-        update,
-        context,
-    )
+    allowed, reason = await add_close_allowed(update, context)
 
     if not allowed:
         if reason:
             await update.message.reply_text(reason)
-
         return
 
     reply = update.message.reply_to_message
 
-    raw_text = (
-        reply.text
-        if reply
-        else ""
-    )
+    raw_text = reply.text if reply else ""
 
     if not raw_text.strip():
         await update.message.reply_text(
-            "❌ <b>Filled deal-form wale message par "
-            "reply karke /add bhejo.</b>",
+            "❌ <b>Filled deal-form wale message par reply karke /add bhejo.</b>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # NEW group flow: reply me deep code (Deal - ABC1234 Accepted) se deal dhundo
-    code_match = re.search(r"Deal\s*-\s*([A-Z0-9]{7})", raw_text, re.I)
+    # ===========================================================
+    # NEW GROUP FLOW (message_id se deal dhundo)
+    # ===========================================================
+    if reply:
+        for tid, deal in DEALS.items():
+            if deal.get("group_message_id") == reply.message_id:
 
-    if code_match:
-        code = code_match.group(1).upper()
+                if deal.get("status") != "ADMIN_ACCEPTED":
+                    await update.message.reply_text(
+                        f"<b>❌ Deal {esc(tid)} is not waiting for /add right now.</b>",
+                        parse_mode=ParseMode.HTML,
+                    )
+                    return
 
-        tid_candidate = None
-        deal_candidate = None
+                if context.args:
+                    custom_amount = extract_amount(context.args[0])
 
-        for _tid, _deal in DEALS.items():
-            if str(_deal.get("deep_code", "")).upper() == code:
-                tid_candidate = _tid
-                deal_candidate = _deal
-                break
+                    if custom_amount > 0:
+                        deal["amount"] = custom_amount
+                        fee_amount = (
+                            custom_amount
+                            * deal.get("fee_percent", DEFAULT_FEE_PERCENT)
+                            / 100
+                        )
+                        deal["release"] = max(0, custom_amount - fee_amount)
 
-        if deal_candidate and "deal_type" in deal_candidate:
-            if deal_candidate.get("status") != "ADMIN_ACCEPTED":
-                await update.message.reply_text(
-                    f"<b>❌ Deal {esc(tid_candidate)} is not waiting for /add right now.</b>",
+                payment_message = await update.message.reply_text(
+                    payment_received_text(tid, deal),
                     parse_mode=ParseMode.HTML,
                 )
+
+                confirm_message = await update.message.reply_text(
+                    confirm_prompt_text(deal),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=deal_action_kb(tid),
+                )
+
+                deal["confirm_message_id"] = confirm_message.message_id
+
+                await unpin_message(
+                    context.bot,
+                    deal.get("chat_id"),
+                    deal.get("group_message_id"),
+                )
+
+                deal["payment_message_id"] = payment_message.message_id
+                deal["status"] = "ACTIVE"
+                save_deal(tid)
+
+                # Group message se Cancel button hata do
+                try:
+                    await context.bot.edit_message_reply_markup(
+                        chat_id=deal["chat_id"],
+                        message_id=deal["group_message_id"],
+                        reply_markup=None,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Couldn't remove cancel button: {e}")
+
+                await pin_message(
+                    context.bot,
+                    deal.get("chat_id"),
+                    payment_message.message_id,
+                )
+
+                try:
+                    await update.message.delete()
+                except Exception:
+                    pass
+
                 return
 
-            tid = tid_candidate
-            deal = deal_candidate
-
-            if context.args:
-                custom_amount = extract_amount(context.args[0])
-
-                if custom_amount > 0:
-                    deal["amount"] = custom_amount
-                    fee_amount = (
-                        custom_amount
-                        * deal.get("fee_percent", DEFAULT_FEE_PERCENT)
-                        / 100
-                    )
-                    deal["release"] = max(0, custom_amount - fee_amount)
-
-            payment_message = await update.message.reply_text(
-                payment_received_text(tid, deal),
-                parse_mode=ParseMode.HTML,
-            )
-
-            confirm_message = await update.message.reply_text(
-                confirm_prompt_text(deal),
-                parse_mode=ParseMode.HTML,
-                reply_markup=deal_action_kb(tid),
-            )
-
-            deal["confirm_message_id"] = confirm_message.message_id
-
-            await unpin_message(
-                context.bot,
-                deal.get("chat_id"),
-                deal.get("group_message_id"),
-            )
-
-            deal["payment_message_id"] = payment_message.message_id
-            deal["status"] = "ACTIVE"
-            save_deal(tid)
-
-            # Form se Cancel button hata do
-            try:
-                await context.bot.edit_message_reply_markup(
-                    chat_id=deal["chat_id"],
-                    message_id=deal["group_message_id"],
-                    reply_markup=None,
-                )
-            except Exception as e:
-                print(f"⚠️ Couldn't remove cancel button: {e}")
-
-            await pin_message(
-                context.bot,
-                deal.get("chat_id"),
-                payment_message.message_id,
-            )
-            try:
-                await update.message.delete()
-            except Exception:
-                pass
-
-            return
-
-    # -----------------------------------------------------------
-    # EXISTING manual /form -> /add flow (unchanged)
-    # -----------------------------------------------------------
-    parsed, error = parse_nt_form(
-        raw_text
-    )
+    # ===========================================================
+    # EXISTING manual /form -> /add flow (UNCHANGED)
+    # ===========================================================
+    parsed, error = parse_nt_form(raw_text)
 
     if not parsed:
         await update.message.reply_text(
@@ -3205,30 +3178,18 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     currency = parsed["currency"]
-
     amount_val = parsed["amount"]
 
     if context.args:
-        custom_amount = extract_amount(
-            context.args[0]
-        )
-
+        custom_amount = extract_amount(context.args[0])
         if custom_amount > 0:
             amount_val = custom_amount
 
     tid = next_trade_id()
-
-    creator_username = resolve_username(
-        update
-    )
+    creator_username = resolve_username(update)
 
     fee_percent = DEFAULT_FEE_PERCENT
-
-    fee_amount = (
-        amount_val
-        * fee_percent
-        / 100
-    )
+    fee_amount = amount_val * fee_percent / 100
 
     DEALS[tid] = {
         "buyer": parsed["buyer"],
@@ -3238,30 +3199,19 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "holding": parsed["holding"],
         "terms": parsed["terms"],
         "amount": amount_val,
-        "release": max(
-            0,
-            amount_val - fee_amount,
-        ),
+        "release": max(0, amount_val - fee_amount),
         "fee_percent": fee_percent,
         "currency": currency,
         "status": "ACTIVE",
         "escrowed_by": creator_username,
         "created_by_id": update.effective_user.id,
         "chat_id": update.effective_chat.id,
-        "created_at": datetime.now(
-            timezone.utc
-        ).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "votes": {
             "release": [],
             "refund": [],
         },
-
-        # Message tracking
-        "form_message_id": (
-            reply.message_id
-            if reply
-            else None
-        ),
+        "form_message_id": reply.message_id if reply else None,
         "payment_message_id": None,
         "confirm_message_id": None,
         "completion_message_id": None,
@@ -3269,27 +3219,13 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     save_deal(tid)
 
-    # -----------------------
-    # Send ACTIVE deal message
-    # -----------------------
-
     payment_message = await update.message.reply_text(
-        payment_received_text(
-            tid,
-            DEALS[tid],
-        ),
+        payment_received_text(tid, DEALS[tid]),
         parse_mode=ParseMode.HTML,
     )
 
-    DEALS[tid]["payment_message_id"] = (
-        payment_message.message_id
-    )
-
+    DEALS[tid]["payment_message_id"] = payment_message.message_id
     save_deal(tid)
-
-    # -----------------------
-    # UNPIN original form
-    # -----------------------
 
     if reply:
         await unpin_message(
@@ -3298,44 +3234,25 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply.message_id,
         )
 
-    # -----------------------
-    # PIN Payment Received
-    # -----------------------
-
     await pin_message(
         context.bot,
         update.effective_chat.id,
         payment_message.message_id,
     )
 
-    # -----------------------
-    # Confirmation buttons
-    # -----------------------
-
     confirm_message = await update.message.reply_text(
-        confirm_prompt_text(
-            DEALS[tid]
-        ),
+        confirm_prompt_text(DEALS[tid]),
         parse_mode=ParseMode.HTML,
         reply_markup=deal_action_kb(tid),
     )
 
-    DEALS[tid]["confirm_message_id"] = (
-        confirm_message.message_id
-    )
-
+    DEALS[tid]["confirm_message_id"] = confirm_message.message_id
     save_deal(tid)
-
-    # -----------------------
-    # Delete /add command
-    # -----------------------
 
     try:
         await update.message.delete()
-
     except Exception:
         pass
-
 
 # ===========================
 # /cancel
