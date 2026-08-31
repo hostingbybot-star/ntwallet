@@ -138,22 +138,7 @@ async def is_group_admin(bot, user_id):
 
 
 async def add_close_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Allow /add and /close for configured admins in private or escrow group."""
-    if not update.effective_user:
-        return False, None
-
-    uid = update.effective_user.id
-    if is_admin(uid):
-        return True, None
-
-    if (
-        update.effective_chat
-        and update.effective_chat.id == ESCROW_GROUP_ID
-        and await is_group_admin(context.bot, uid)
-    ):
-        return True, None
-
-    return False, None
+    return is_admin(update.effective_user.id), None
 
 
 # ===========================
@@ -427,6 +412,8 @@ def calculate_fee(amount, is_exchange=False):
 # Dashboard
 # ===========================
 def main_menu_kb():
+    # FIX: every button now sends the exact callback_data the router
+    # is looking for (previously all sent generic "create" / "menu").
     rows = [
         [
             InlineKeyboardButton(
@@ -470,6 +457,7 @@ def main_menu_kb():
 
 
 def status_kb():
+    # FIX: correct destinations for each button.
     rows = [
         [
             InlineKeyboardButton(
@@ -498,6 +486,7 @@ def status_kb():
 
 
 def back_refresh_kb(refresh_target):
+    # FIX: Back button now goes to "menu:back" (was bare "menu").
     rows = [
         [
             InlineKeyboardButton(
@@ -812,6 +801,7 @@ def my_deals_kb(update: Update, page=0):
 
 
 def deal_view_kb(page):
+    # FIX: "Main Menu" button now sends "menu:back" (was bare "menu").
     rows = [
         [
             InlineKeyboardButton(
@@ -1487,17 +1477,15 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         # Admin accepted the deal in the group.
         #
         # Flow:
-        #   1. Group card -> stays as the plain deal card, its
-        #      Accept/Reject buttons removed (nobody can act on the
-        #      card itself anymore).
-        #   2. A SEPARATE "Deal accepted by @admin" notice is sent
-        #      right underneath, carrying the visible Trade ID (for
-        #      /add to find later) and a Cancel button.
-        #   3. escrowed_by is updated to the accepting admin's username.
-        #   4. Nothing else happens automatically — /add (used by an
-        #      admin, replying to the notice message) is what posts
-        #      the "Payment received!" info card and the Release/
-        #      Refund voting buttons.
+        #   1. Group post -> edited to "Deal accepted by @admin" and the
+        #      Accept/Reject buttons are replaced with a single Cancel
+        #      button (visible to everyone, usable only by buyer/seller/
+        #      admin).
+        #   2. escrowed_by is updated to the accepting admin's username.
+        #   3. Nothing else happens automatically — /add (used by an
+        #      admin, replying to this message) is what posts the
+        #      "Payment received!" info card and pins it. /close is what
+        #      later posts the seller's "Received" confirmation button.
         # ------------------------------------------------------------
 
         admin_username = resolve_username(update)
@@ -1511,28 +1499,14 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
 
         try:
             await query.edit_message_text(
-                deal_group_text(tid, deal),
+                deal_accepted_group_text(tid, deal),
                 parse_mode=ParseMode.HTML,
-                reply_markup=None,
+                reply_markup=group_cancel_kb(tid),
             )
         except Exception as exc:
             print(f"⚠️ group admin accept edit failed: {exc}")
 
         await query.answer("Deal accepted.")
-
-        # Separate "Deal accepted by..." notice, underneath the card,
-        # carrying the Cancel button and the visible Trade ID.
-        try:
-            notice_message = await context.bot.send_message(
-                chat_id=deal["chat_id"],
-                text=deal_admin_accepted_notice_text(tid, deal),
-                parse_mode=ParseMode.HTML,
-                reply_markup=None,
-            )
-            deal["accepted_notice_message_id"] = notice_message.message_id
-            save_deal(tid)
-        except Exception as exc:
-            print(f"⚠️ Could not send accepted notice: {exc}")
 
         for uid2 in {deal.get("buyer_id"), deal.get("seller_id")}:
             if not uid2:
@@ -1689,7 +1663,7 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     # -----------------------
-    # Deal action (release/refund voting)
+    # Existing deal action (release/refund voting - kept for /add flow)
     # -----------------------
     if data.startswith("dealaction:"):
         try:
@@ -1925,6 +1899,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # CREATE DEAL WIZARD
 # ===========================
 def create_deal_type_kb():
+    # FIX: type buttons now carry the actual type value
+    # (create:type:Crypto / create:type:NFT / create:type:Others),
+    # previously all sent bare "create:type" which the router's
+    # data.split(":", 2)[2] could never satisfy. Back now sends
+    # "create:cancel" to return to the main dashboard.
     return InlineKeyboardMarkup(
         [
             [
@@ -1987,6 +1966,10 @@ def create_currency_kb(currencies=("INR", "USDT", "TON")):
 
 
 def create_role_kb():
+    # FIX: Buyer/Seller now send their actual role value
+    # (create:role:buyer / create:role:seller) instead of the
+    # identical bare "create:role" for both buttons. Back now
+    # correctly returns to the currency step.
     return InlineKeyboardMarkup(
         [
             [
@@ -2027,6 +2010,8 @@ def create_back_kb(callback_data="create"):
 
 
 def create_confirm_kb():
+    # FIX: Confirm/Cancel now send "create:confirm" / "create:cancel"
+    # (previously both sent bare "create").
     return InlineKeyboardMarkup(
         [
             [
@@ -2067,6 +2052,10 @@ def deal_invite_kb(tid):
 
 
 def join_group_kb(tid):
+    # FIX: Cancel button now sends "groupcancel:{tid}" — matches the
+    # router's `data.startswith("groupcancel:")` handler. It previously
+    # sent "group:cancel:{tid}" (extra colon), which never matched
+    # anything, so this button was completely dead.
     rows = []
 
     if ESCROW_GROUP_INVITE_LINK:
@@ -2179,19 +2168,22 @@ def deal_group_text(tid, deal):
     )
 
 
-def deal_admin_accepted_notice_text(tid, deal):
+def deal_accepted_group_text(tid, deal):
     """
-    Sent as its OWN separate message right after the group deal card
-    is edited (Accept/Reject buttons removed). This is the message
-    that carries the Cancel button and the visible Trade ID.
-
-    IMPORTANT: the trade ID is kept here (not just tracked in DEALS)
-    because /add, used later in reply to THIS notice message, finds
-    the deal by regex-matching DL-TR4DE-N out of the replied-to
-    message text. Admin/creator must reply to this notice (not the
-    plain deal card) when running /add.
+    Shown in the group once an admin has tapped Accept. Keeps the deal
+    details visible and shows who accepted it. The visible trade ID is
+    kept so that /add (used later, in reply to this message) can find
+    the deal.
     """
     return (
+        f"#NFTTraders [Escrow Deal]\n\n"
+        f"➥ <b>Deal Type:</b> {esc(deal.get('deal_type', '-'))}\n"
+        f"➥ <b>Currency:</b> {esc(deal.get('currency', '-'))}\n"
+        f"➥ <b>Buyer:</b> {esc(deal.get('buyer', 'pending'))}\n"
+        f"➥ <b>Seller:</b> {esc(deal.get('seller', 'pending'))}\n"
+        f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
+        f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
+        f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
         f"{pe('✅')} <b>Deal accepted by {esc(deal.get('admin_accepted_username', '-'))} !</b>\n"
         f"<b>ID:</b> <code>{esc(tid)}</code>"
     )
@@ -2232,10 +2224,8 @@ def group_admin_action_kb(tid):
 
 
 # ---------------------------------------------------------------------
-# Payment confirmation ("Received" button) — still used by the manual
-# /form -> /add flow's finalize path when triggered from the callback
-# `dealconfirm:received:`. Not used by the group wizard flow anymore
-# (that flow now uses Release/Refund voting via deal_action_kb).
+# Payment confirmation ("Received" button) — posted by /close, once the
+# escrow admin is ready to release funds to the seller.
 # ---------------------------------------------------------------------
 def payment_confirm_text(tid, deal):
     return (
@@ -2449,6 +2439,10 @@ FORM_TITLE = "#NFTTraders Escrow"
 
 
 def currency_kb():
+    # FIX: buttons now carry their actual currency value
+    # (newdeal:currency:TON / USDT / INR) instead of the bare
+    # "newdeal:currency" that could never match
+    # data.rsplit(":", 1)[1].upper() in the router.
     return InlineKeyboardMarkup(
         [
             [
@@ -2470,6 +2464,10 @@ def currency_kb():
 
 
 def deal_action_kb(tid):
+    # FIX: Release/Refund now include the action itself
+    # ("dealaction:{tid}:release" / ":refund") — previously both
+    # buttons sent the identical "dealaction:{tid}", which failed
+    # the router's `_, tid, action = data.split(":", 2)` unpack.
     return InlineKeyboardMarkup(
         [
             [
@@ -3058,18 +3056,12 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Two flows share this command:
 
-    1) NEW group flow — reply to the "Deal accepted by @admin" notice
-       message posted after the group admin taps Accept. The trade ID
-       is read straight out of that message (it already carries the
-       full deal record in DEALS), so nothing needs to be re-typed.
-
-       This posts the "Payment received!" info card (not pinned), then
-       removes the Cancel button from the accepted-notice message, and
-       finally sends a fresh Release/Refund voting prompt — the same
-       kind used by the manual /form flow. The deal becomes ACTIVE and
-       is ready to be finalized once both Buyer and Seller vote the
-       same way (handled by the existing `dealaction:` callback and
-       `/close`).
+    1) NEW group flow — reply to the "Deal accepted by @admin" message
+       posted after the group admin taps Accept. The trade ID is read
+       straight out of that message (it already carries the full deal
+       record in DEALS), so nothing needs to be re-typed. This just
+       posts the "Payment received!" info card and pins it, marking
+       the deal ACTIVE and ready for /close.
 
     2) EXISTING manual flow (unchanged) — reply to a hand-filled
        /form template. Behaves exactly as before.
@@ -3103,10 +3095,10 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -----------------------------------------------------------
-    # NEW group flow: reply to the GROUP "Deal accepted by @admin"
-    # notice. /add starts the active phase and posts Release/Refund.
+    # NEW group flow: reply carries a DL-TR4DE-N id from the wizard
     # -----------------------------------------------------------
     id_match = re.search(r"\b(DL-TR4DE-\d+)\b", raw_text, re.I)
+
     if id_match:
         tid_candidate = id_match.group(1).upper()
         deal_candidate = DEALS.get(tid_candidate)
@@ -3126,6 +3118,7 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if context.args:
                 custom_amount = extract_amount(context.args[0])
+
                 if custom_amount > 0:
                     deal["amount"] = custom_amount
                     fee_amount = (
@@ -3135,22 +3128,24 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     deal["release"] = max(0, custom_amount - fee_amount)
 
-            payment_message = await context.bot.send_message(
-                chat_id=deal["chat_id"],
-                text=payment_received_text(tid, deal),
+            payment_message = await update.message.reply_text(
+                payment_received_text(tid, deal),
                 parse_mode=ParseMode.HTML,
-                reply_markup=deal_action_kb(tid),
+            )
+
+            await unpin_message(
+                context.bot,
+                deal.get("chat_id"),
+                deal.get("group_message_id"),
             )
 
             deal["payment_message_id"] = payment_message.message_id
             deal["status"] = "ACTIVE"
-            deal["close_requested"] = False
-            deal["votes"] = {"release": [], "refund": []}
             save_deal(tid)
 
             await pin_message(
                 context.bot,
-                deal["chat_id"],
+                deal.get("chat_id"),
                 payment_message.message_id,
             )
 
@@ -3670,14 +3665,16 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /close ke baad:
 
-    ALL deals (both the group wizard flow and the manual /form -> /add
-    flow) now finalize the SAME way — via Buyer + Seller votes recorded
-    through the Release/Refund buttons sent by /add. `/close` just
-    double-checks those votes and calls finalize_deal().
+    NEW group-flow deals (created via the wizard, "deal_type" present):
+        mode == "release":
+            ACTIVE payment/info card -> UNPIN
+            "Received" confirmation prompt -> SEND + PIN
+            (Deal only finalizes once the seller taps Received.)
+        mode == "refund":
+            Admin-authorized instant refund via finalize_deal().
 
-    The one exception is an admin-authorized instant REFUND on a
-    group-wizard deal: an escrow admin can force-refund without
-    waiting for both parties to vote, same as before.
+    EXISTING manual /form -> /add deals: unchanged — still requires
+    both Buyer and Seller votes before finalizing.
 
     /close command: DELETE
     """
@@ -3819,35 +3816,22 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -----------------------
-    # NEW group flow
-    # /add -> Release/Refund buttons.
-    # /close release -> Seller "Received" confirmation.
-    # /close refund -> finalize after both parties chose Refund.
+    # NEW group-flow deals
     # -----------------------
+
     if is_new_flow:
-        votes = deal.get("votes", {})
-        release_votes = {str(x).lower() for x in votes.get("release", [])}
-        refund_votes = {str(x).lower() for x in votes.get("refund", [])}
-
-        parties = {
-            str(deal.get("buyer", "")).lower(),
-            str(deal.get("seller", "")).lower(),
-        }
-
         if mode == "refund":
-            if not parties.issubset(refund_votes):
-                await update.message.reply_text(
-                    "<b>❌ Buyer aur Seller dono ne Refund confirm nahi kiya.</b>",
-                    parse_mode=ParseMode.HTML,
-                )
-                return
-
             deal["closed_by"] = resolve_username(update)
+
             success = await finalize_deal(
-                context, tid, deal, "refund",
+                context,
+                tid,
+                deal,
+                mode,
                 closer_id=closer_id,
                 custom_amount=custom_amount,
             )
+
             if not success:
                 return
 
@@ -3855,25 +3839,26 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.delete()
             except Exception:
                 pass
+
             return
 
-        if not parties.issubset(release_votes):
-            await update.message.reply_text(
-                "<b>❌ Buyer aur Seller dono ne Release confirm nahi kiya.</b>",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-
+        # mode == "release": post the seller confirmation prompt.
         if deal.get("close_requested"):
             await update.message.reply_text(
-                "<b>⏳ Received confirmation already waiting.</b>",
+                "<b>⏳ Seller confirmation already waiting.</b>",
                 parse_mode=ParseMode.HTML,
             )
             return
 
         deal["close_requested"] = True
-        deal["closed_by"] = resolve_username(update)
         save_deal(tid)
+
+        payment_message = await context.bot.send_message(
+            chat_id=deal["chat_id"],
+            text=payment_confirm_text(tid, deal),
+            parse_mode=ParseMode.HTML,
+            reply_markup=payment_confirm_kb(tid),
+        )
 
         await unpin_message(
             context.bot,
@@ -3881,20 +3866,13 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deal.get("payment_message_id"),
         )
 
-        received_message = await context.bot.send_message(
-            chat_id=deal["chat_id"],
-            text=payment_confirm_text(tid, deal),
-            parse_mode=ParseMode.HTML,
-            reply_markup=payment_confirm_kb(tid),
-        )
-
-        deal["received_message_id"] = received_message.message_id
+        deal["payment_message_id"] = payment_message.message_id
         save_deal(tid)
 
         await pin_message(
             context.bot,
             deal["chat_id"],
-            received_message.message_id,
+            payment_message.message_id,
         )
 
         try:
@@ -3905,7 +3883,7 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -----------------------
-    # Existing manual /form -> /add flow
+    # EXISTING manual-form flow (unchanged)
     # -----------------------
 
     votes = deal.get(
@@ -4378,7 +4356,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += [
             "",
             "<b>🛡 Admin Commands</b>",
-            "<b>/add — Group ke &quot;Deal accepted&quot; message par reply karke active deal start karo</b>",
+            "<b>/add — Filled form par reply karke deal create karo</b>",
             "<b>/add 500 — Custom amount ke saath deal create karo</b>",
             "<b>/close — Deal complete/refund karo</b>",
             "<b>/alldeals — Saari deals ki list</b>",
