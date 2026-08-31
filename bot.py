@@ -6,6 +6,7 @@ import threading
 import secrets
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from turtle import update
 
 from dotenv import load_dotenv
 from pymongo import MongoClient, ReturnDocument
@@ -1503,6 +1504,15 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                 parse_mode=ParseMode.HTML,
                 reply_markup=group_cancel_kb(tid),
             )
+
+            await context.bot.send_message(
+                chat_id=deal["chat_id"],
+                text=(
+                    f"{pe('✅')} <b>Deal accepted by "
+                    f"{esc(admin_username)} !</b>"
+                ),
+                parse_mode=ParseMode.HTML,
+            )
         except Exception as exc:
             print(f"⚠️ group admin accept edit failed: {exc}")
 
@@ -1596,9 +1606,13 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
         username = resolve_username(update).lower()
         seller = str(deal.get("seller", "")).lower()
 
-        if username != seller:
+        uid = update.effective_user.id
+        username = resolve_username(update).lower()
+        seller = str(deal.get("seller","")).lower()
+
+        if username != seller and not is_admin(uid):
             await query.answer(
-                "Only the Seller can confirm this.",
+                "Only Seller or Admin can confirm.",
                 show_alert=True,
             )
             return
@@ -2184,8 +2198,7 @@ def deal_accepted_group_text(tid, deal):
         f"➥ <b>Item:</b> {esc(deal.get('item', '-'))}\n"
         f"➥ <b>Amount:</b> {esc(fmt(deal.get('amount', 0), deal.get('currency', 'INR')))}\n"
         f"➥ <b>Terms:</b> {esc(deal.get('terms', '-'))}\n\n"
-        f"{pe('✅')} <b>Deal accepted by {esc(deal.get('admin_accepted_username', '-'))} !</b>\n"
-        f"<b>ID:</b> <code>{esc(tid)}</code>"
+        f"{pe('🔒')} <b>Escrowed by @Tr4deGc</b>"
     )
 
 
@@ -3133,6 +3146,14 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.HTML,
             )
 
+            confirm_message = await update.message.reply_text(
+                confirm_prompt_text(deal),
+                parse_mode=ParseMode.HTML,
+                reply_markup=deal_action_kb(tid),
+            )
+
+            deal["confirm_message_id"] = confirm_message.message_id
+
             await unpin_message(
                 context.bot,
                 deal.get("chat_id"),
@@ -3143,12 +3164,21 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deal["status"] = "ACTIVE"
             save_deal(tid)
 
+            # Form se Cancel button hata do
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=deal["chat_id"],
+                    message_id=deal["group_message_id"],
+                    reply_markup=None,
+                )
+            except Exception as e:
+                print(f"⚠️ Couldn't remove cancel button: {e}")
+
             await pin_message(
                 context.bot,
                 deal.get("chat_id"),
                 payment_message.message_id,
             )
-
             try:
                 await update.message.delete()
             except Exception:
@@ -3860,20 +3890,8 @@ async def close(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=payment_confirm_kb(tid),
         )
 
-        await unpin_message(
-            context.bot,
-            deal["chat_id"],
-            deal.get("payment_message_id"),
-        )
-
         deal["payment_message_id"] = payment_message.message_id
         save_deal(tid)
-
-        await pin_message(
-            context.bot,
-            deal["chat_id"],
-            payment_message.message_id,
-        )
 
         try:
             await update.message.delete()
