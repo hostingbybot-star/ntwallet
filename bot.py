@@ -3106,21 +3106,25 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # -----------------------------------------------------------
-    # NEW group flow: reply carries a DL-TR4DE-N id from the wizard
-    # -----------------------------------------------------------
-    id_match = re.search(r"\b(DL-TR4DE-\d+)\b", raw_text, re.I)
+    # NEW group flow: reply me deep code (Deal - ABC1234 Accepted) se deal dhundo
+    code_match = re.search(r"Deal\s*-\s*([A-Z0-9]{7})", raw_text, re.I)
 
-    if id_match:
-        tid_candidate = id_match.group(1).upper()
-        deal_candidate = DEALS.get(tid_candidate)
+    if code_match:
+        code = code_match.group(1).upper()
+
+        tid_candidate = None
+        deal_candidate = None
+
+        for _tid, _deal in DEALS.items():
+            if str(_deal.get("deep_code", "")).upper() == code:
+                tid_candidate = _tid
+                deal_candidate = _deal
+                break
 
         if deal_candidate and "deal_type" in deal_candidate:
             if deal_candidate.get("status") != "ADMIN_ACCEPTED":
                 await update.message.reply_text(
-                    f"<b>❌ Deal {esc(tid_candidate)} is not waiting for "
-                    f"/add right now (status: "
-                    f"{esc(deal_candidate.get('status', '-'))}).</b>",
+                    f"<b>❌ Deal {esc(tid_candidate)} is not waiting for /add right now.</b>",
                     parse_mode=ParseMode.HTML,
                 )
                 return
