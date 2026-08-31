@@ -1524,8 +1524,8 @@ async def _callback_router_impl(update: Update, context: ContextTypes.DEFAULT_TY
                 await context.bot.send_message(
                     chat_id=uid2,
                     text=(
-                        f"{pe('✅')} <b>Deal {esc(tid)} has been accepted by "
-                        f"{esc(admin_username)}.</b>"
+                        # f"{pe('✅')} <b>Deal {esc(tid)} has been accepted by "
+                        # f"{esc(admin_username)}.</b>"
                     ),
                     parse_mode=ParseMode.HTML,
                 )
